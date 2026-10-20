@@ -80,6 +80,7 @@ pub struct Stream {
     #[arg(long)]
     pub no_audio: bool,
     /// hls: 1-second segments. mkv: one continuous Matroska stream (experimental).
+    /// mirror: Cast Streaming, as Chrome's tab casting, about 0.15 s behind the screen (experimental).
     #[arg(long, value_enum, default_value_t = Format::Hls)]
     pub format: Format,
 }
@@ -88,6 +89,7 @@ pub struct Stream {
 pub enum Format {
     Hls,
     Mkv,
+    Mirror,
 }
 
 fn parse_resolution(s: &str) -> Result<(u32, u32), String> {

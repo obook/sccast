@@ -138,6 +138,15 @@ impl Receiver {
         &self.app.app_id
     }
 
+    /// Connection to the device, attached to the receiver app.
+    pub fn channel(&self) -> &CastDevice<'static> {
+        &self.cast
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.app.session_id
+    }
+
     /// Close the receiver app, freeing the TV.
     pub fn close(&self) {
         if let Err(e) = self.cast.receiver.stop_app(self.app.session_id.clone()) {

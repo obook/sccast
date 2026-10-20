@@ -26,34 +26,40 @@ pub const MKV: &str = "live.mkv";
 /// max-files must stay above playlist-length.
 /// Matroska: tcpserversink sends each new client the stream header, then starts it at the
 /// latest keyframe (as GNOME Network Displays does); the HTTP server relays it to the TV.
+/// Mirror: one access unit per buffer, SPS/PPS before each key frame (the receiver can start on
+/// any). Key frames every 5 s only: the receiver asks for one when it loses a frame.
 fn video_encode(stream: &Stream) -> String {
     let Stream { resolution: (width, height), fps, bitrate, format, .. } = stream;
-    let sink = match format {
-        Format::Hls => "hlssink2 name=sink target-duration=1 playlist-length=20 max-files=25",
-        Format::Mkv => {
-            "matroskamux name=sink streamable=true \
+    let (key_interval, sink) = match format {
+        Format::Hls => (*fps, "h264parse ! hlssink2 name=sink target-duration=1 playlist-length=20 max-files=25"),
+        Format::Mkv => (
+            *fps,
+            "h264parse ! matroskamux name=sink streamable=true \
              ! tcpserversink name=out host=127.0.0.1 port=0 sync=false \
-             sync-method=latest-keyframe recover-policy=keyframe"
-        }
+             sync-method=latest-keyframe recover-policy=keyframe",
+        ),
+        Format::Mirror => (
+            fps * 5,
+            "h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au \
+             ! appsink name=sink sync=false max-buffers=4",
+        ),
     };
     format!(
         "video/x-raw,format=I420,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1 \
-         ! x264enc tune=zerolatency speed-preset=veryfast key-int-max={fps} bitrate={bitrate} \
+         ! x264enc name=venc tune=zerolatency speed-preset=veryfast key-int-max={key_interval} bitrate={bitrate} \
          ! video/x-h264,profile=high \
-         ! h264parse \
          ! {sink}"
     )
 }
 
+/// Mirror: Opus in 10 ms frames, each one a Cast frame.
 fn audio_encode(format: Format) -> String {
-    let pad = match format {
-        Format::Hls => "audio",
-        Format::Mkv => "audio_%u",
+    let encode = match format {
+        Format::Hls => "avenc_aac bitrate=128000 ! aacparse ! sink.audio",
+        Format::Mkv => "avenc_aac bitrate=128000 ! aacparse ! sink.audio_%u",
+        Format::Mirror => "opusenc bitrate=128000 frame-size=10 ! appsink name=asink sync=false max-buffers=20",
     };
-    format!(
-        "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 \
-         ! avenc_aac bitrate=128000 ! aacparse ! sink.{pad}"
-    )
+    format!("audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! {encode}")
 }
 
 /// Segments to wait for before casting: the window must already be twice the receiver's
@@ -147,6 +153,16 @@ impl Capture {
     pub fn served(&self) -> Option<impl Fn() -> u64 + Send + 'static> {
         let out = self.pipeline.downcast_ref::<gst::Bin>()?.by_name("out")?;
         Some(move || out.property::<u64>("bytes-served"))
+    }
+
+    /// The pipeline, for its running time (mirror format).
+    pub fn pipeline(&self) -> gst::Element {
+        self.pipeline.clone()
+    }
+
+    /// Element `name` of the pipeline: appsinks and encoder of the mirror format.
+    pub fn element(&self, name: &str) -> Option<gst::Element> {
+        self.pipeline.downcast_ref::<gst::Bin>()?.by_name(name)
     }
 
     pub fn dir(&self) -> &Path {

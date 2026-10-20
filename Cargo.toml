@@ -11,6 +11,9 @@ description = "Cast your Linux desktop to a Chromecast"
 repository = "https://github.com/obook/sccast"
 
 [dependencies]
+# AES-CTR of the mirror format's frames.
+aes = "0.9.3"
+ctr = "0.10.1"
 anyhow = "1.0.104"
 ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
@@ -22,6 +25,8 @@ mdns-sd = "0.21.5"
 ratatui = "0.30.2"
 # thread_safe: the launch runs in a thread, so it can be given up after a timeout.
 rust_cast = { version = "0.21.0", features = ["thread_safe"] }
+# Already pulled by rust_cast: OFFER and ANSWER of the mirror format.
+serde_json = "1.0.154"
 tempfile = "3.27.0"
 tokio = { version = "1.54.0", features = ["rt", "net", "time"] }
 tokio-util = { version = "0.7.20", features = ["io"] }

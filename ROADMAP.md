@@ -54,7 +54,14 @@ If needed:
 ## Stage 2: Cast Streaming
 
 Real-time mirroring, as Chrome does, aiming at a fraction of a second.
+Notes in [docs/cast-streaming.md](docs/cast-streaming.md).
 
-- [ ] Build `cast_sender` from [openscreen](https://chromium.googlesource.com/openscreen/) and cast a video file to a Chromecast
-- [ ] Check whether `cast_sender` can take a live stream, so sccast could run it instead of a new sender
-- [ ] Otherwise write the sender in Rust: OFFER/ANSWER, RTP encrypted with AES-CTR, RTCP, bitrate adaptation
+- [x] Check that the mirroring receiver (`0F5096E8`) accepts a sender that is not Chrome (on the Sharp TV)
+- [ ] ~~Build `cast_sender` from openscreen~~: dropped, our own sender was simpler
+- [x] Python prototype (`proto/`)
+- [x] Rust sender, `--format mirror`, with sound: 153 ms on the Sharp
+- [ ] Test from the menu: Enter, `s`, `q`, closing the terminal
+- [ ] Test on a Chromecast dongle and a Nest Hub
+- [ ] Reconnect when the TV drops the session
+- [ ] Tune the bitrate steps and the target delay (100 ms) on a lossy network
+- [ ] Measure the lip sync

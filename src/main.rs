@@ -3,6 +3,7 @@ mod cast;
 mod cli;
 mod discovery;
 mod menu;
+mod mirror;
 mod portal;
 mod server;
 
@@ -104,6 +105,9 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Serve { test_pattern, stream } => {
+            if stream.format == cli::Format::Mirror {
+                bail!("the mirror format streams to a TV only: use `sccast cast --format mirror`");
+            }
             let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };
             let stop = stop_flag()?;
             let hls = capture::Capture::start(screen.as_ref(), &stream, Duration::ZERO)?;
@@ -184,9 +188,12 @@ fn cast_screen(
     keep: Option<&'static AtomicBool>,
     out: &Out,
 ) -> anyhow::Result<()> {
+    tracing::info!(name = %device.name, ip = %device.ip, "casting");
+    if s.stream.format == cli::Format::Mirror {
+        return mirror::cast(device, s, screen, stop, out);
+    }
     let reuse = keep.is_some();
     let keep = keep.unwrap_or(&NO_KEEP);
-    tracing::info!(name = %device.name, ip = %device.ip, "casting");
     let stream = &s.stream;
     let ip = server::lan_ip(device.ip.into())?;
     let hls = capture::Capture::start(Some(screen), stream, Duration::from_millis(s.audio_delay))?;
