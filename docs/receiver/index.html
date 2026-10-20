@@ -30,6 +30,8 @@ const MAX_BUFFERING_PER_MINUTE = 2;
 const AUDIO_BPS = 128000;
 // The player buffers several times while it starts: not a stutter.
 const STARTUP_MS = 15000;
+// Buffering this long means sccast is gone (PC turned off, terminal killed): close, the TV goes home.
+const GIVE_UP_MS = 30000;
 
 const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
@@ -39,6 +41,8 @@ let debug = false;
 let videoBps = 0;
 // Time of the last LOAD.
 let loadedAt = 0;
+// Start of the current buffering, 0 while playing.
+let stalledSince = 0;
 
 player.setMediaPlaybackInfoHandler((request, config) => {
   loadedAt = Date.now();
@@ -91,6 +95,14 @@ setInterval(() => {
     return;
   }
   const now = Date.now();
+  if (player.getPlayerState() !== cast.framework.messages.PlayerState.BUFFERING) {
+    stalledSince = 0;
+  } else if (!stalledSince) {
+    stalledSince = now;
+  } else if (now - stalledSince > GIVE_UP_MS) {
+    context.stop();
+    return;
+  }
   while (buffering.length && now - buffering[0] > 60000) {
     buffering.shift();
   }

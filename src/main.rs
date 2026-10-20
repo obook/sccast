@@ -273,7 +273,8 @@ fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     MENU_LOG.store(true, Ordering::Relaxed);
     let mut terminal = ratatui::init();
     let result = drive_menu(&mut terminal, &mut settings, screen, quit);
-    ratatui::restore();
+    // Not restore(): its eprintln! panics when the terminal was closed.
+    let _ = ratatui::try_restore();
     result
 }
 
@@ -290,8 +291,17 @@ fn drive_menu(
     let mut running: Option<(&'static AtomicBool, &'static AtomicBool, JoinHandle<()>)> = None;
     // TV where the receiver may be open, and its app id.
     let mut tv: Option<(discovery::CastDevice, String)> = None;
+    // Error of a terminal closed without quitting: returned once the TV is freed.
+    let mut lost = None;
     loop {
-        let action = menu.next(terminal, s, quit)?;
+        let action = match menu.next(terminal, s, quit) {
+            Ok(action) => action,
+            Err(e) => {
+                tracing::warn!("terminal lost: {e:#}");
+                lost = Some(e);
+                menu::Action::Quit
+            }
+        };
         if let menu::Action::PickScreen = action {
             // In a thread: the menu keeps answering while the dialog is open. The cast goes on meanwhile.
             let out = Out::Menu(menu.current_sender());
@@ -315,7 +325,8 @@ fn drive_menu(
         let keep_open = same_tv || matches!(action, menu::Action::Stop);
         if let Some((stop, keep, cast)) = running.take() {
             menu.set_status(menu::Status::Info("Stopping...".into()));
-            menu.draw_now(terminal, s)?;
+            // The terminal may be closed: freeing the TV comes first.
+            let _ = menu.draw_now(terminal, s);
             keep.store(keep_open, Ordering::SeqCst);
             stop.store(true, Ordering::SeqCst);
             wait_for(&cast);
@@ -324,7 +335,7 @@ fn drive_menu(
             // A receiver left open by s, on this TV or another one.
             if let Some((device, app_id)) = tv.take() {
                 menu.set_status(menu::Status::Info(format!("Closing the receiver on {}...", device.name)));
-                menu.draw_now(terminal, s)?;
+                let _ = menu.draw_now(terminal, s);
                 wait_for(&std::thread::spawn(move || drop(cast::stop(&device, &app_id, None))));
             }
         }
@@ -332,7 +343,7 @@ fn drive_menu(
             tv = None;
         }
         let device = match action {
-            menu::Action::Quit => return Ok(()),
+            menu::Action::Quit => return lost.map_or(Ok(()), Err),
             menu::Action::Stop | menu::Action::PickScreen => continue,
             menu::Action::Cast(device) => device,
         };
@@ -373,7 +384,8 @@ fn stop_flag() -> anyhow::Result<&'static AtomicBool> {
         // ponytail: exit skips destructors (the tmpfs segment dir stays), add a timeout per call if that matters.
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_secs(5));
-            eprintln!("The device did not answer: exiting.");
+            // Not eprintln!: it panics when the terminal was closed (SIGHUP), and the exit would not come.
+            let _ = writeln!(std::io::stderr(), "The device did not answer: exiting.");
             std::process::exit(130);
         });
     })?;
