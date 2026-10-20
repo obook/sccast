@@ -90,6 +90,22 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
 
+## Custom receiver (experimental)
+
+`docs/receiver/` is a receiver page that plays closer to live than the
+Default Media Receiver and shows the delay in a corner of the TV. It is
+served at <https://obook.github.io/sccast/receiver/>.
+
+1. Register at the [Google Cast SDK Developer Console](https://cast.google.com/publish)
+   ($5, once).
+2. Add an application of type Custom Receiver with the page URL above.
+   Note its application ID.
+3. Add your TV under Devices with its serial number. Wait 15 minutes, then
+   unplug the TV or Chromecast and plug it back in.
+4. `sccast cast --receiver <application ID>`
+
+An unpublished application only runs on the devices registered in step 3.
+
 ## Troubleshooting
 
 No device found: the PC may block mDNS (UDP 5353).

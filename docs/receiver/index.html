@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>sccast receiver</title>
+<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+<style>
+  body { margin: 0; background: #000; }
+  #lag { position: absolute; right: 2vw; bottom: 2vh; z-index: 10; color: #fff8; font: 2.5vh sans-serif; }
+</style>
+</head>
+<body>
+<cast-media-player></cast-media-player>
+<div id="lag"></div>
+<script>
+// Seconds behind the newest segment. Shaka's HLS default is 3 segments (3 s for sccast).
+const TARGET_LATENCY = 1.5;
+
+const context = cast.framework.CastReceiverContext.getInstance();
+const player = context.getPlayerManager();
+
+const playback = new cast.framework.PlaybackConfig();
+playback.shakaConfig = {
+  manifest: { defaultPresentationDelay: TARGET_LATENCY },
+  // Plays slightly faster when it falls behind, instead of staying late after a stall.
+  streaming: { liveSync: { enabled: true, targetLatency: TARGET_LATENCY, maxPlaybackRate: 1.1 } },
+};
+
+const options = new cast.framework.CastReceiverOptions();
+options.useShakaForHls = true;
+options.shakaVersion = '4.15.56';
+options.playbackConfig = playback;
+
+// Shown on the TV while tuning TARGET_LATENCY.
+const lag = document.getElementById('lag');
+setInterval(() => {
+  const range = player.getLiveSeekableRange();
+  lag.textContent = range && range.end ? `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live` : '';
+}, 1000);
+
+context.start(options);
+</script>
+</body>
+</html>
