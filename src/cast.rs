@@ -74,7 +74,7 @@ pub fn launch(device: &Device, app_id: &str) -> anyhow::Result<Receiver> {
                 ""
             } else {
                 ". An unpublished app runs only on devices registered in the Cast console, \
-                 15 minutes and a restart after registration"
+                 and a new app takes a while to reach the devices: retry later or restart the device"
             };
             format!("cannot launch the receiver app {app_id} on {}{hint}", device.name)
         })?;
