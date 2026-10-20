@@ -18,6 +18,7 @@ mdns-sd = "0.21.5"
 rust_cast = "0.21.0"
 tempfile = "3.27.0"
 tokio = { version = "1.54.0", features = ["rt", "net", "time"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
 tower-http = { version = "0.7.1", features = ["fs", "cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

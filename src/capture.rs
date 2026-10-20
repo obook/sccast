@@ -8,10 +8,11 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use tempfile::TempDir;
 
-use crate::cli::Stream;
+use crate::cli::{Format, Stream};
 use crate::portal::ScreenCast;
 
 pub const PLAYLIST: &str = "live.m3u8";
+pub const MKV: &str = "live.mkv";
 
 /// Raw format and encoder for `stream`.
 /// Letterboxed to the output size whatever the screen shape; I420 is what profile High accepts.
@@ -22,33 +23,53 @@ pub const PLAYLIST: &str = "live.m3u8";
 /// and rebuffering, each stall adding latency for good. A 20 s window leaves it room;
 /// latency depends on the 3 segments, not on the window length.
 /// max-files must stay above playlist-length.
+/// Matroska: tcpserversink sends each new client the stream header, then starts it at the
+/// latest keyframe (as GNOME Network Displays does); the HTTP server relays it to the TV.
 fn video_encode(stream: &Stream) -> String {
-    let Stream { resolution: (width, height), fps, bitrate, .. } = stream;
+    let Stream { resolution: (width, height), fps, bitrate, format, .. } = stream;
+    let sink = match format {
+        Format::Hls => "hlssink2 name=sink target-duration=1 playlist-length=20 max-files=25",
+        Format::Mkv => {
+            "matroskamux name=sink streamable=true \
+             ! tcpserversink name=out host=127.0.0.1 port=0 sync=false \
+             sync-method=latest-keyframe recover-policy=keyframe"
+        }
+    };
     format!(
         "video/x-raw,format=I420,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1 \
          ! x264enc tune=zerolatency speed-preset=veryfast key-int-max={fps} bitrate={bitrate} \
          ! video/x-h264,profile=high \
          ! h264parse \
-         ! hlssink2 name=sink target-duration=1 playlist-length=20 max-files=25"
+         ! {sink}"
     )
 }
 
-const AUDIO_ENCODE: &str = "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 \
-    ! avenc_aac bitrate=128000 ! aacparse ! sink.audio";
+fn audio_encode(format: Format) -> String {
+    let pad = match format {
+        Format::Hls => "audio",
+        Format::Mkv => "audio_%u",
+    };
+    format!(
+        "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 \
+         ! avenc_aac bitrate=128000 ! aacparse ! sink.{pad}"
+    )
+}
 
 /// Segments to wait for before casting: the window must already be twice the receiver's
 /// 3-segment hold-back, or it starts at the window edge and stalls until the playlist grows.
 pub const MIN_SEGMENTS: usize = 6;
 
-/// Running capture pipeline writing HLS into a temporary directory.
+/// Running capture pipeline, writing HLS into a temporary directory or Matroska to a local TCP port.
 /// Dropping it stops the pipeline, then deletes the directory and closes the portal session.
-pub struct Hls {
+pub struct Capture {
     pipeline: gst::Element,
     dir: TempDir,
+    /// Local port of the Matroska stream (mkv format only).
+    pub tcp_port: Option<u16>,
     _screen: Option<ScreenCast>,
 }
 
-impl Hls {
+impl Capture {
     /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
     /// `audio_delay` shifts the sound later to line it up with the image.
     pub fn start(screen: Option<ScreenCast>, stream: &Stream, audio_delay: Duration) -> anyhow::Result<Self> {
@@ -80,7 +101,7 @@ impl Hls {
                 // Monitor of the default output: what the PC is playing. Works with pipewire-pulse.
                 Some(_) => "pulsesrc name=asrc device=@DEFAULT_MONITOR@",
             };
-            description.push_str(&format!(" {audio_source} ! {AUDIO_ENCODE}"));
+            description.push_str(&format!(" {audio_source} ! {}", audio_encode(stream.format)));
         }
         tracing::debug!(%description, "pipeline");
 
@@ -93,13 +114,20 @@ impl Hls {
             let pad = asrc.static_pad("src").context("audio source has no src pad")?;
             pad.set_offset(audio_delay.as_nanos() as i64);
         }
-        let sink = bin.by_name("sink").context("hlssink2 not found in pipeline")?;
-        sink.set_property("location", path_str(&dir.path().join("seg%05d.ts"))?);
-        sink.set_property("playlist-location", path_str(&dir.path().join(PLAYLIST))?);
+        if stream.format == Format::Hls {
+            let sink = bin.by_name("sink").context("hlssink2 not found in pipeline")?;
+            sink.set_property("location", path_str(&dir.path().join("seg%05d.ts"))?);
+            sink.set_property("playlist-location", path_str(&dir.path().join(PLAYLIST))?);
+        }
 
         pipeline.set_state(gst::State::Playing)?;
-        tracing::info!(dir = %dir.path().display(), "capture started");
-        Ok(Self { pipeline, dir, _screen: screen })
+        // tcpserversink binds port 0 when it starts: read the port it got.
+        let tcp_port = match bin.by_name("out") {
+            Some(out) => Some(u16::try_from(out.property::<i32>("current-port")).context("no Matroska port")?),
+            None => None,
+        };
+        tracing::info!(dir = %dir.path().display(), ?tcp_port, "capture started");
+        Ok(Self { pipeline, dir, tcp_port, _screen: screen })
     }
 
     pub fn dir(&self) -> &Path {
@@ -154,7 +182,7 @@ fn poll_bus(bus: &gst::Bus, timeout: Duration) -> anyhow::Result<()> {
     }
 }
 
-impl Drop for Hls {
+impl Drop for Capture {
     fn drop(&mut self) {
         let _ = self.pipeline.set_state(gst::State::Null);
     }

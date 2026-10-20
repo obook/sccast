@@ -56,12 +56,15 @@ fn main() -> anyhow::Result<()> {
             }
 
             let screen = portal::ScreenCast::open()?;
-            let hls = capture::Hls::start(Some(screen), &stream, Duration::from_millis(audio_delay))?;
-            server::serve_hls(hls.dir(), port)?;
+            let hls = capture::Capture::start(Some(screen), &stream, Duration::from_millis(audio_delay))?;
+            let (path, content_type) = serve(&hls, &stream)?;
             // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
             let receiver = launch(&device, &app_id)?;
             let prepared = spin("Preparing the stream...", || -> anyhow::Result<()> {
-                while hls.segments()? < capture::MIN_SEGMENTS && !stop.load(Ordering::SeqCst) {
+                while stream.format == cli::Format::Hls
+                    && hls.segments()? < capture::MIN_SEGMENTS
+                    && !stop.load(Ordering::SeqCst)
+                {
                     hls.poll(Duration::from_millis(100))?;
                 }
                 Ok(())
@@ -79,11 +82,11 @@ fn main() -> anyhow::Result<()> {
             if cfg!(debug_assertions) {
                 query.push("debug".to_string());
             }
-            let mut url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
+            let mut url = format!("http://{ip}:{port}/{path}");
             if !query.is_empty() {
                 url = format!("{url}?{}", query.join("&"));
             }
-            let played = receiver.play(&url, "application/x-mpegURL", true, stop);
+            let played = receiver.play(&url, content_type, true, stop);
             stop.store(true, Ordering::SeqCst);
             // A capture failure explains why the cast stopped: report it first.
             capture.join().expect("capture watcher panicked")?;
@@ -99,9 +102,9 @@ fn main() -> anyhow::Result<()> {
         Command::Serve { test_pattern, stream } => {
             let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };
             let stop = stop_flag()?;
-            let hls = capture::Hls::start(screen, &stream, Duration::ZERO)?;
-            server::serve_hls(hls.dir(), stream.port)?;
-            println!("http://localhost:{}/{}", stream.port, capture::PLAYLIST);
+            let hls = capture::Capture::start(screen, &stream, Duration::ZERO)?;
+            let (path, _) = serve(&hls, &stream)?;
+            println!("http://localhost:{}/{path}", stream.port);
             while !stop.load(Ordering::SeqCst) {
                 hls.poll(Duration::from_millis(200))?;
             }
@@ -111,10 +114,33 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Serve the capture over HTTP; return the stream path and its content type.
+fn serve(capture: &capture::Capture, stream: &cli::Stream) -> anyhow::Result<(&'static str, &'static str)> {
+    match capture.tcp_port {
+        Some(source) => {
+            server::serve_mkv(source, stream.port)?;
+            Ok((capture::MKV, "video/x-matroska"))
+        }
+        None => {
+            server::serve_hls(capture.dir(), stream.port)?;
+            Ok((capture::PLAYLIST, "application/x-mpegURL"))
+        }
+    }
+}
+
 /// Flag set by Ctrl+C or SIGTERM. The handler can be installed only once per process.
 fn stop_flag() -> anyhow::Result<&'static AtomicBool> {
     static STOP: AtomicBool = AtomicBool::new(false);
-    ctrlc::set_handler(|| STOP.store(true, Ordering::SeqCst))?;
+    ctrlc::set_handler(|| {
+        STOP.store(true, Ordering::SeqCst);
+        // Closing the TV app hung once the TV was back on its home screen: do not wait forever.
+        // ponytail: exit skips destructors (the tmpfs segment dir stays), add a timeout per call if that matters.
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(5));
+            eprintln!("The device did not answer: exiting.");
+            std::process::exit(130);
+        });
+    })?;
     Ok(&STOP)
 }
 

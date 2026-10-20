@@ -79,6 +79,15 @@ pub struct Stream {
     /// No sound.
     #[arg(long)]
     pub no_audio: bool,
+    /// hls: 1-second segments. mkv: one continuous Matroska stream (experimental).
+    #[arg(long, value_enum, default_value_t = Format::Hls)]
+    pub format: Format,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Format {
+    Hls,
+    Mkv,
 }
 
 fn parse_resolution(s: &str) -> Result<(u32, u32), String> {

@@ -2,11 +2,15 @@ use std::net::{IpAddr, TcpListener, UdpSocket};
 use std::path::Path;
 
 use anyhow::Context;
+use axum::body::Body;
 use axum::extract::Request;
 use axum::http::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::StatusCode;
 use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use axum::Router;
+use tokio_util::io::ReaderStream;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -29,6 +33,22 @@ pub fn serve_hls(dir: &Path, port: u16) -> anyhow::Result<()> {
         .fallback_service(ServeDir::new(dir))
         .layer(middleware::from_fn(hls_headers));
     spawn(app, port)
+}
+
+/// Relay the local Matroska stream on `source` at `/live.mkv` on `port`, one TCP connection per request.
+pub fn serve_mkv(source: u16, port: u16) -> anyhow::Result<()> {
+    let app = Router::new().route(&format!("/{}", crate::capture::MKV), get(move || relay(source)));
+    spawn(app, port)
+}
+
+async fn relay(source: u16) -> Response {
+    match tokio::net::TcpStream::connect(("127.0.0.1", source)).await {
+        Ok(tcp) => ([(CONTENT_TYPE, "video/x-matroska")], Body::from_stream(ReaderStream::new(tcp))).into_response(),
+        Err(e) => {
+            tracing::warn!("cannot reach the Matroska stream: {e}");
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+    }
 }
 
 /// mime_guess maps .m3u8 to audio/x-mpegurl and .ts to video/vnd.dlna.mpeg-tts:

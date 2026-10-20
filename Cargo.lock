@@ -1340,6 +1340,7 @@ dependencies = [
  "rust_cast",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",
