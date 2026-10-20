@@ -14,7 +14,7 @@ Google's receiver.
 - PipeWire, with `pipewire-pulse` for sound.
 - GStreamer (tested with 1.24).
 - A Rust toolchain (`cargo`).
-- PC and TV on the same local network, mDNS (UDP 5353) allowed between
+- Linux PC and TV with Chromecast built-in or Google Chromecast device on the same local network, mDNS (UDP 5353) allowed between
   them.
 
 ## Install
