@@ -29,6 +29,9 @@ pub enum Command {
         /// Play this local MP4 file, served over HTTP on the LAN.
         #[arg(long)]
         file: Option<PathBuf>,
+        /// Cast the screen without sound.
+        #[arg(long)]
+        no_audio: bool,
     },
     /// Close the media receiver left running on a device.
     Stop {
@@ -41,5 +44,8 @@ pub enum Command {
         /// Capture a test pattern instead of the screen.
         #[arg(long)]
         test_pattern: bool,
+        /// Serve the capture without sound.
+        #[arg(long)]
+        no_audio: bool,
     },
 }

@@ -25,6 +25,9 @@ const ENCODE: &str = "x264enc tune=zerolatency speed-preset=veryfast key-int-max
     ! h264parse \
     ! hlssink2 name=sink target-duration=1 playlist-length=20 max-files=25";
 
+const AUDIO_ENCODE: &str = "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 \
+    ! avenc_aac bitrate=128000 ! aacparse ! sink.audio";
+
 /// Segments to wait for before casting: the window must already be twice the receiver's
 /// 3-segment hold-back, or it starts at the window edge and stalls until the playlist grows.
 pub const MIN_SEGMENTS: usize = 6;
@@ -38,8 +41,8 @@ pub struct Hls {
 }
 
 impl Hls {
-    /// Capture `screen`, or a test pattern when it is None.
-    pub fn start(screen: Option<ScreenCast>) -> anyhow::Result<Self> {
+    /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
+    pub fn start(screen: Option<ScreenCast>, audio: bool) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
@@ -56,7 +59,15 @@ impl Hls {
                 screen.node_id
             ),
         };
-        let description = format!("{source} ! videoconvert ! videoscale ! {RAW_CAPS} ! {ENCODE}");
+        let mut description = format!("{source} ! videoconvert ! videoscale ! {RAW_CAPS} ! {ENCODE}");
+        if audio {
+            let audio_source = match &screen {
+                None => "audiotestsrc is-live=true wave=ticks volume=0.3",
+                // Monitor of the default output: what the PC is playing. Works with pipewire-pulse.
+                Some(_) => "pulsesrc device=@DEFAULT_MONITOR@",
+            };
+            description.push_str(&format!(" {audio_source} ! {AUDIO_ENCODE}"));
+        }
         tracing::debug!(%description, "pipeline");
 
         let pipeline = gst::parse::launch(&description).context("cannot build pipeline (missing GStreamer plugin?)")?;
