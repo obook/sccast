@@ -56,7 +56,7 @@ sudo pacman -S pkgconf gstreamer gst-plugins-{base,good,bad,ugly} gst-libav \
 Check the GStreamer elements, then build:
 
 ```sh
-gst-inspect-1.0 pipewiresrc pulsesrc x264enc hlssink2 avenc_aac > /dev/null
+gst-inspect-1.0 pipewiresrc pulsesrc x264enc hlssink2 avenc_aac opusenc appsink > /dev/null
 cargo build --release
 ```
 
@@ -64,7 +64,9 @@ The binary is `target/release/sccast`.
 
 ## Firewall
 
-Open TCP port 8090 to your local network:
+HLS needs TCP port 8090 open to your local network. Screen mirroring sends
+UDP to the TV, and the TV's reports come back on the same connection: a
+firewall that lets replies in should not block it (not checked yet).
 
 ```sh
 sudo ufw allow from 192.168.1.0/24 to any port 8090 proto tcp   # ufw
@@ -93,8 +95,9 @@ then open a menu: the devices appear as they answer, and the command line
 options prefill the settings. Arrows move and change, Tab switches columns,
 Enter casts, or casts again with the new settings. The menu stays during the
 cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
-chooses another screen, `q` or Ctrl+C quits and frees the TV. Between two
-casts to the same TV, the receiver stays open on it.
+chooses another screen, `q` or Ctrl+C quits and frees the TV, and so does
+closing the terminal. In HLS, the receiver stays open on the TV between two
+casts to the same TV.
 
 `cast` opens the screen picker, then starts the TV. In HLS it first waits
 about 6 seconds for the stream to fill. Ctrl+C stops the TV at once.
@@ -108,7 +111,7 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--resolution WxH` | `1920x1080` | Output size, letterboxed to keep the screen shape |
 | `--fps N` | `30` | Frame rate |
 | `--bitrate KBPS` | `2500` | Video bitrate in kbit/s |
-| `--port N` | `8090` | HTTP port the TV fetches the stream from |
+| `--port N` | `8090` | HTTP port the TV fetches the HLS stream from |
 | `--no-audio` | | Video only |
 | `--format mirror` | `mirror` | Google's screen mirroring, H.264 and Opus over RTP, about 0.15 s of delay. HLS on a device without it |
 | `--format hls` | | 1-second HLS segments, 2 to 3 s of delay. `serve`, `--url` and `--file` always use it |
@@ -117,9 +120,10 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
 
-## Receiver
+## Receiver (HLS)
 
-The TV runs sccast's receiver, the page in `docs/receiver/` served at
+Screen mirroring uses Google's mirroring receiver (`0F5096E8`), built into
+the devices. In HLS, the TV runs sccast's receiver, the page in `docs/receiver/` served at
 <https://obook.github.io/sccast/receiver/> and published in the Google Cast
 console as application `8FE12008`. It plays 1 second behind the newest
 segment, against 3 for Google's Default Media Receiver.
@@ -140,7 +144,7 @@ A debug build (`cargo build`) shows the delay in a corner of the TV.
 
 No device found: the PC may block mDNS (UDP 5353).
 
-Stuck on the Cast logo: the firewall most likely blocks port 8090.
+Stuck on the Cast logo in HLS: the firewall most likely blocks port 8090.
 `RUST_LOG=sccast=info,tower_http=debug` shows whether the TV requests the
 stream.
 
@@ -158,8 +162,9 @@ PCM (needed on a Sharp TV, with every app).
 Stutter, or sound ahead of a frozen image, on moving content: the TV may not
 decode 1080p in real time. Try `--resolution 1280x720 --bitrate 2500`.
 
-The TV drops back to its home screen: `sccast` launches the receiver again,
-up to 3 times in 5 minutes, without limit in the menu. If the device no
+The TV drops back to its home screen in HLS: `sccast` launches the receiver
+again, up to 3 times in 5 minutes, without limit in the menu. Screen
+mirroring does not reconnect yet: press Enter in the menu. If the device no
 longer shows in `sccast list`, unplug it and plug it back in.
 
 The first launch on a Chromecast can fail after about a minute: the menu
