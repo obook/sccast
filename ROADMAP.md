@@ -30,7 +30,8 @@ To do:
 - [ ] Alert when the TV buffers often (more than 2 per minute): the most frequent problem, and the one the TV reports itself
 - [ ] Measure segment downloads on the TV side: the send time on the PC only shows a badly congested network (kernel buffers)
 - [ ] Tune the alert thresholds on the school network
-- [ ] Show these warnings on the TV, top right, with sccast's receiver only (page-side player stats, or a custom Cast message from sccast)
+- [x] Warning on the TV, top right, with sccast's receiver: network too slow (Shaka's bandwidth estimate against the stream bitrate) or frequent buffering
+- [ ] Check the TV warning on a congested network (school)
 
 If needed:
 
