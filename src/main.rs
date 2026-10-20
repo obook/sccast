@@ -34,26 +34,38 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Cast { device, url, file } => {
-            if url.is_none() && file.is_none() {
-                bail!("screen capture is not implemented yet (J5): use --url or --file");
-            }
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
                 }
             }
+            // Find the device before the portal dialog, so a typo fails fast.
             let device = pick_device(device.as_deref())?;
-            let url = match (url, file) {
-                (Some(url), _) => url,
-                (None, Some(file)) => {
-                    server::serve_file(&file, HTTP_PORT)?;
-                    let ip = server::lan_ip(device.ip.into())?;
-                    format!("http://{ip}:{HTTP_PORT}/media")
-                }
-                (None, None) => unreachable!(),
-            };
             tracing::info!(name = %device.name, ip = %device.ip, "casting");
-            cast::play_url(&device, &url, "video/mp4", stop_flag()?)
+            let stop = stop_flag()?;
+            let ip = server::lan_ip(device.ip.into())?;
+
+            if let Some(url) = url {
+                return cast::play_url(&device, &url, "video/mp4", false, stop);
+            }
+            if let Some(file) = file {
+                server::serve_file(&file, HTTP_PORT)?;
+                return cast::play_url(&device, &format!("http://{ip}:{HTTP_PORT}/media"), "video/mp4", false, stop);
+            }
+
+            let hls = capture::Hls::start(Some(portal::ScreenCast::open()?))?;
+            server::serve_hls(hls.dir(), HTTP_PORT)?;
+            // The receiver gives up on a playlist with fewer than two segments.
+            while hls.segments()? < 2 {
+                if stop.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                hls.poll(Duration::from_millis(100))?;
+            }
+            // ponytail: pipeline errors are not watched while casting; poll the bus
+            // from a thread if a capture failure ever leaves the TV frozen.
+            let url = format!("http://{ip}:{HTTP_PORT}/{}", capture::PLAYLIST);
+            cast::play_url(&device, &url, "application/x-mpegURL", true, stop)
         }
         Command::Serve { test_pattern } => {
             let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };

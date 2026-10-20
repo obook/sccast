@@ -12,7 +12,8 @@ const RECEIVER: &str = "receiver-0";
 
 /// Launch the Default Media Receiver on `device`, play `url`, and block until
 /// playback ends, the app is closed elsewhere, or `stop` is set.
-pub fn play_url(device: &Device, url: &str, content_type: &str, stop: &AtomicBool) -> anyhow::Result<()> {
+/// `live` tells the receiver not to buffer ahead (HLS capture).
+pub fn play_url(device: &Device, url: &str, content_type: &str, live: bool, stop: &AtomicBool) -> anyhow::Result<()> {
     // Chromecasts use self-signed certificates.
     let cast = CastDevice::connect_without_host_verification(device.ip.to_string(), device.port)
         .with_context(|| format!("cannot connect to {} ({}:{})", device.name, device.ip, device.port))?;
@@ -25,7 +26,7 @@ pub fn play_url(device: &Device, url: &str, content_type: &str, stop: &AtomicBoo
 
     let media = Media {
         content_id: url.to_string(),
-        stream_type: StreamType::Buffered,
+        stream_type: if live { StreamType::Live } else { StreamType::Buffered },
         content_type: content_type.to_string(),
         metadata: None,
         duration: None,
