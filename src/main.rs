@@ -157,6 +157,7 @@ impl Out {
             cast::Report::Say(m) => self.say(m),
             cast::Report::Player(state) => self.send(menu::Status::Player(format!("{state:?}"))),
             cast::Report::Reconnecting => self.send(menu::Status::Reconnecting),
+            cast::Report::Loaded(..) => {}
         }
     }
 

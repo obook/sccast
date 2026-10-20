@@ -78,6 +78,13 @@ const TEXT = french
 const lag = document.getElementById('lag');
 const warn = document.getElementById('warn');
 setInterval(() => {
+  // Nothing plays (stopped by sccast, or ended): no warning, and a fresh count for the next cast.
+  if (player.getPlayerState() === cast.framework.messages.PlayerState.IDLE) {
+    buffering.length = 0;
+    warn.style.display = 'none';
+    lag.textContent = '';
+    return;
+  }
   const now = Date.now();
   while (buffering.length && now - buffering[0] > 60000) {
     buffering.shift();

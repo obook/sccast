@@ -48,6 +48,14 @@ pub fn stop(device: &Device, app_id: &str, session: Option<&str>) -> anyhow::Res
     Ok(true)
 }
 
+/// Stop the media playing in a receiver app, leaving the app open.
+fn stop_media(device: &Device, transport_id: &str, media_session: i32) -> anyhow::Result<()> {
+    let cast = connect(device)?;
+    cast.connection.connect(transport_id.to_string())?;
+    cast.media.stop(transport_id.to_string(), media_session)?;
+    Ok(())
+}
+
 /// Receiver app running on a device, ready to play.
 pub struct Receiver {
     cast: CastDevice<'static>,
@@ -126,17 +134,27 @@ impl Receiver {
         // receive() blocks until the next message (up to ~5 s): close the app
         // from a second connection so Ctrl+C frees the TV at once.
         let session = Arc::new(Mutex::new(receiver.app.session_id.clone()));
+        // Transport and media session of the current playback, set by each LOAD.
+        let playing: Arc<Mutex<Option<(String, i32)>>> = Arc::default();
         let app_id = receiver.app.app_id.clone();
         let watcher = {
             let device = receiver.device.clone();
             let app_id = app_id.clone();
             let session = Arc::clone(&session);
+            let playing = Arc::clone(&playing);
             std::thread::spawn(move || {
                 while !stop.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 tracing::info!("stopping");
                 if keep.load(Ordering::SeqCst) {
+                    // Leave the app open, but stop its player: it would retry the dead stream forever.
+                    let current = playing.lock().unwrap().clone();
+                    if let Some((transport, media_session)) = current {
+                        if let Err(e) = stop_media(&device, &transport, media_session) {
+                            tracing::warn!("cannot stop the media: {e:#}");
+                        }
+                    }
                     return;
                 }
                 let session = session.lock().unwrap().clone();
@@ -157,7 +175,13 @@ impl Receiver {
         let mut drops = 0;
         let mut last_drop = Instant::now();
         loop {
-            let mut why = match play_session(&receiver.cast, &receiver.app, &device, &media, live, &watcher, report)? {
+            let track = |r: Report| {
+                if let Report::Loaded(transport, media_session) = r {
+                    *playing.lock().unwrap() = Some((transport.to_string(), media_session));
+                }
+                report(r);
+            };
+            let mut why = match play_session(&receiver.cast, &receiver.app, &device, &media, live, &watcher, &track)? {
                 Outcome::Ended => return Ok(()),
                 Outcome::Lost(why) => why,
             };
@@ -207,6 +231,8 @@ pub enum Report<'a> {
     Say(&'a str),
     Player(&'a PlayerState),
     Reconnecting,
+    /// A LOAD succeeded: transport id and media session.
+    Loaded(&'a str, i32),
 }
 
 /// Why a playback session stopped.
@@ -248,6 +274,7 @@ fn play_session(
             .map(|e| e.media_session_id)
             .context("LOAD returned no media session")?;
         tracing::info!(%url, media_session, "media loaded");
+        report(Report::Loaded(&app.transport_id, media_session));
         Ok(media_session)
     };
     let mut media_session = load()?;
