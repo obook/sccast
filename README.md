@@ -5,7 +5,8 @@ device with Chromecast built-in, as HLS served over HTTP on your local
 network and played by sccast's own receiver page.
 
 It does not use Google's screen mirroring, the one Chrome and Brave use.
-Expect 2 to 3 seconds of delay on the TV.
+Expect 2 to 3 seconds of delay on the TV, about 5 if sccast falls back to
+Google's receiver.
 
 ## Requirements
 
