@@ -70,8 +70,8 @@ pub struct Stream {
     /// Frames per second. Above 30 at 1080p, some TVs cannot decode the stream.
     #[arg(long, default_value_t = 30)]
     pub fps: u32,
-    /// Video bitrate in kbit/s.
-    #[arg(long, default_value_t = 4000)]
+    /// Video bitrate in kbit/s. 4000 froze an entry-level TV on moving content.
+    #[arg(long, default_value_t = 2500)]
     pub bitrate: u32,
     /// HTTP port the TV fetches the stream from (open it in the firewall).
     #[arg(long, default_value_t = 8090)]

@@ -25,8 +25,10 @@ To do:
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
 - [ ] First GitHub release with both .deb
 - [x] Launch menu (ratatui): device list, presets and settings, prefilled from the command line
-- [ ] Keep the menu during the cast: state, change settings or device, stop, quit with Ctrl+C
+- [x] Keep the menu during the cast: state, stats, change settings or device, stop, quit with Ctrl+C
 - [ ] Warn when the PC is too loaded to stream (dropped frames, late segments)
+- [ ] Warn when the network is congested (slow segment downloads by the TV, round trip to its Cast port, buffering per minute)
+- [ ] Show these warnings on the TV, top right, with sccast's receiver only (page-side player stats, or a custom Cast message from sccast)
 
 If needed:
 

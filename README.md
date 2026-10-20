@@ -74,9 +74,12 @@ sccast stop --device "Kitchen"               # close a cast left running
 sccast serve                                 # local stream, no TV
 ```
 
-In a terminal, `sccast` and `cast` without `--device` open a menu: the
-devices appear as they answer, and the command line options prefill the
-settings. Arrows move and change, Tab switches columns, Enter casts.
+In a terminal, `sccast` and `cast` without `--device` ask for the screen,
+then open a menu: the devices appear as they answer, and the command line
+options prefill the settings. Arrows move and change, Tab switches columns,
+Enter casts, or casts again with the new settings. The menu stays during the
+cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
+chooses another screen, `q` or Ctrl+C quits and frees the TV.
 
 `cast` opens the screen picker, waits about 6 seconds for the stream to
 fill, then starts the TV. Ctrl+C stops the TV at once.
@@ -89,7 +92,7 @@ problem. VLC stutters on this live stream and is not a reliable check.
 |---|---|---|
 | `--resolution WxH` | `1920x1080` | Output size, letterboxed to keep the screen shape |
 | `--fps N` | `30` | Frame rate |
-| `--bitrate KBPS` | `4000` | Video bitrate in kbit/s |
+| `--bitrate KBPS` | `2500` | Video bitrate in kbit/s |
 | `--port N` | `8090` | HTTP port the TV fetches the stream from |
 | `--no-audio` | | Video only |
 | `--format mkv` | `hls` | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |

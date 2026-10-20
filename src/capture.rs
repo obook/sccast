@@ -60,19 +60,19 @@ fn audio_encode(format: Format) -> String {
 pub const MIN_SEGMENTS: usize = 6;
 
 /// Running capture pipeline, writing HLS into a temporary directory or Matroska to a local TCP port.
-/// Dropping it stops the pipeline, then deletes the directory and closes the portal session.
+/// Dropping it stops the pipeline, then deletes the directory. The portal session outlives it,
+/// so a new capture can start on the same screen without asking again.
 pub struct Capture {
     pipeline: gst::Element,
     dir: TempDir,
     /// Local port of the Matroska stream (mkv format only).
     pub tcp_port: Option<u16>,
-    _screen: Option<ScreenCast>,
 }
 
 impl Capture {
     /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
     /// `audio_delay` shifts the sound later to line it up with the image.
-    pub fn start(screen: Option<ScreenCast>, stream: &Stream, audio_delay: Duration) -> anyhow::Result<Self> {
+    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay: Duration) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
@@ -127,7 +127,21 @@ impl Capture {
             None => None,
         };
         tracing::info!(dir = %dir.path().display(), ?tcp_port, "capture started");
-        Ok(Self { pipeline, dir, tcp_port, _screen: screen })
+        Ok(Self { pipeline, dir, tcp_port })
+    }
+
+    /// Bytes sent so far by the Matroska server (mkv format only), to measure the bitrate.
+    pub fn served(&self) -> Option<impl Fn() -> u64 + Send + 'static> {
+        let out = self.pipeline.downcast_ref::<gst::Bin>()?.by_name("out")?;
+        Some(move || out.property::<u64>("bytes-served"))
+    }
+
+    /// Stops the pipeline from another thread, when the one owning the capture is stuck.
+    pub fn halter(&self) -> impl FnOnce() + Send + 'static {
+        let pipeline = self.pipeline.clone();
+        move || {
+            let _ = pipeline.set_state(gst::State::Null);
+        }
     }
 
     pub fn dir(&self) -> &Path {

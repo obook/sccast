@@ -101,7 +101,15 @@ impl Receiver {
     /// Play `url` and block until playback ends, the TV is taken by another sender, or `stop` is set.
     /// If the device drops the session, launch the receiver again and resume.
     /// `live` tells the receiver not to buffer ahead (HLS capture).
-    pub fn play(self, url: &str, content_type: &str, live: bool, stop: &'static AtomicBool) -> anyhow::Result<()> {
+    /// `report` shows progress to the user (terminal or menu).
+    pub fn play(
+        self,
+        url: &str,
+        content_type: &str,
+        live: bool,
+        stop: &'static AtomicBool,
+        report: &dyn Fn(Report),
+    ) -> anyhow::Result<()> {
         let mut receiver = self;
         // receive() blocks until the next message (up to ~5 s): close the app
         // from a second connection so Ctrl+C frees the TV at once.
@@ -134,7 +142,7 @@ impl Receiver {
         let mut drops = 0;
         let mut last_drop = Instant::now();
         loop {
-            let mut why = match play_session(&receiver.cast, &receiver.app, &device, &media, live, &watcher)? {
+            let mut why = match play_session(&receiver.cast, &receiver.app, &device, &media, live, &watcher, report)? {
                 Outcome::Ended => return Ok(()),
                 Outcome::Lost(why) => why,
             };
@@ -156,7 +164,8 @@ impl Receiver {
                         device.name
                     );
                 }
-                eprintln!("Lost {} ({why}). Reconnecting ({drops}/{MAX_RECONNECTS})...", device.name);
+                report(Report::Reconnecting);
+                report(Report::Say(&format!("Lost {} ({why}). Reconnecting ({drops}/{MAX_RECONNECTS})...", device.name)));
                 std::thread::sleep(RECONNECT_DELAY);
                 match launch(&device, &app_id) {
                     Ok(new) => {
@@ -175,6 +184,13 @@ impl Receiver {
     }
 }
 
+/// What `Receiver::play` tells the user.
+pub enum Report<'a> {
+    Say(&'a str),
+    Player(&'a PlayerState),
+    Reconnecting,
+}
+
 /// Why a playback session stopped.
 enum Outcome {
     /// Playback is over: it ended, was stopped, or another sender took the TV.
@@ -190,6 +206,7 @@ fn play_session(
     media: &Media,
     live: bool,
     watcher: &std::thread::JoinHandle<()>,
+    report: &dyn Fn(Report),
 ) -> anyhow::Result<Outcome> {
     let url = &media.content_id;
     let load = || -> anyhow::Result<i32> {
@@ -210,7 +227,7 @@ fn play_session(
             tracing::warn!("cannot close the receiver app: {e}");
         }
     };
-    eprintln!("Casting to {}. Press Ctrl+C to stop.", device.name);
+    report(Report::Say(&format!("Casting to {}. Ctrl+C stops.", device.name)));
     let mut app_seen = false;
     loop {
         if watcher.is_finished() {
@@ -240,6 +257,7 @@ fn play_session(
                 let current = media_session;
                 for entry in status.entries.into_iter().filter(|e| e.media_session_id == current) {
                     tracing::info!(state = ?entry.player_state, time = ?entry.current_time, "media");
+                    report(Report::Player(&entry.player_state));
                     if matches!(entry.player_state, PlayerState::Idle) && entry.idle_reason.is_some() {
                         tracing::info!(reason = ?entry.idle_reason, "playback ended");
                         // A live stream has no end: the player gave up, so load it again.
@@ -258,6 +276,14 @@ fn play_session(
                 }
             }
             ChannelMessage::Media(other) => {
+                // The Sharp refused once right after sccast was restarted, and accepted the next try.
+                if matches!(other, MediaResponse::LoadFailed(_)) && reloads < MAX_RELOADS {
+                    reloads += 1;
+                    tracing::warn!(attempt = reloads, "stream refused, loading it again");
+                    std::thread::sleep(Duration::from_secs(1));
+                    media_session = load()?;
+                    continue;
+                }
                 close_app();
                 if matches!(other, MediaResponse::LoadFailed(_)) {
                     anyhow::bail!(

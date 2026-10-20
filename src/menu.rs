@@ -1,14 +1,16 @@
 //! Launch menu: pick a device found on the network and adjust the stream settings.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Sparkline};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::cast::{DEFAULT_MEDIA_RECEIVER, SCCAST_RECEIVER};
@@ -16,6 +18,7 @@ use crate::cli::{Format, Stream};
 use crate::discovery::{self, CastDevice};
 
 /// Settings the menu edits, prefilled from the command line.
+#[derive(Clone)]
 pub struct Settings {
     pub stream: Stream,
     pub audio_delay: u64,
@@ -47,15 +50,106 @@ enum Found {
     Done,
 }
 
-/// Show the menu until the user casts (Some(device)) or quits (None).
-pub fn run(settings: &mut Settings) -> anyhow::Result<Option<CastDevice>> {
-    let mut terminal = ratatui::init();
-    let result = Menu::new().run(&mut terminal, settings);
-    ratatui::restore();
-    result
+/// What the user asked for.
+pub enum Action {
+    /// Cast to this device, stopping the current cast first.
+    Cast(CastDevice),
+    Stop,
+    /// Choose the screen again in the portal dialog.
+    PickScreen,
+    Quit,
 }
 
-struct Menu {
+/// Progress of the running cast, sent by its thread.
+pub enum Status {
+    Info(String),
+    Error(String),
+    Ended,
+    /// Player state reported by the TV (Playing, Buffering...).
+    Player(String),
+    Reconnecting,
+    /// Directory of the HLS segments, to measure the real bitrate.
+    Segments(PathBuf),
+    /// Bytes sent so far by the Matroska server, for the same measure.
+    Served(ByteCounter),
+}
+
+pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
+
+/// Stats of the current cast, shown in the Live panel.
+#[derive(Default)]
+struct Live {
+    started: Option<Instant>,
+    tv: String,
+    /// Start of each buffering period.
+    buffering: Vec<Instant>,
+    reconnects: u32,
+    segments: Option<PathBuf>,
+    /// Matroska byte counter, and its last reading.
+    served: Option<(ByteCounter, Option<(u64, Instant)>)>,
+    /// kbit/s, one sample per second, last minute.
+    bitrate: Vec<u64>,
+    /// sccast's CPU time in clock ticks, and when it was read.
+    cpu_ticks: Option<(u64, Instant)>,
+    /// Percent of one core.
+    cpu: f64,
+    sampled: Option<Instant>,
+}
+
+impl Live {
+    /// Refresh the measures once a second.
+    fn sample(&mut self) {
+        if self.sampled.is_some_and(|t| t.elapsed() < Duration::from_secs(1)) {
+            return;
+        }
+        self.sampled = Some(Instant::now());
+        if let Some(dir) = &self.segments {
+            // Segments written in the last 5 s: about 5 one-second segments.
+            let bytes: u64 = std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| e.metadata().ok())
+                .filter(|m| m.modified().ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() < 5))
+                .map(|m| m.len())
+                .sum();
+            self.bitrate.push(bytes * 8 / 5 / 1000);
+        }
+        if let Some((counter, last)) = &mut self.served {
+            let bytes = counter();
+            if let Some((before, at)) = *last {
+                self.bitrate.push((bytes.saturating_sub(before) as f64 * 8.0 / 1000.0 / at.elapsed().as_secs_f64()) as u64);
+            }
+            *last = Some((bytes, Instant::now()));
+        }
+        if self.bitrate.len() > 60 {
+            self.bitrate.remove(0);
+        }
+        if let Some(ticks) = cpu_ticks() {
+            if let Some((before, at)) = self.cpu_ticks {
+                // ponytail: assumes 100 ticks per second (the Linux default), read sysconf if it ever differs.
+                self.cpu = (ticks - before) as f64 / at.elapsed().as_secs_f64();
+            }
+            self.cpu_ticks = Some((ticks, Instant::now()));
+        }
+    }
+}
+
+/// utime + stime of this process, from /proc/self/stat (fields 14 and 15).
+fn cpu_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // The command name can hold spaces: count fields after its closing parenthesis.
+    let mut fields = stat.rsplit_once(')')?.1.split_whitespace().skip(11);
+    Some(fields.next()?.parse::<u64>().ok()? + fields.next()?.parse::<u64>().ok()?)
+}
+
+fn load_average() -> Option<String> {
+    let load = std::fs::read_to_string("/proc/loadavg").ok()?;
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    Some(format!("{}/{cpus}", load.split_whitespace().next()?))
+}
+
+pub struct Menu {
     devices: BTreeMap<String, CastDevice>,
     device: ListState,
     row: ListState,
@@ -64,11 +158,18 @@ struct Menu {
     tick: usize,
     tx: Sender<Found>,
     rx: Receiver<Found>,
+    status: Status,
+    /// Id of the device being cast to.
+    casting: Option<String>,
+    status_tx: Sender<Status>,
+    status_rx: Receiver<Status>,
+    live: Live,
 }
 
 impl Menu {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
+        let (status_tx, status_rx) = mpsc::channel();
         let mut menu = Self {
             devices: BTreeMap::new(),
             device: ListState::default().with_selected(Some(0)),
@@ -78,9 +179,60 @@ impl Menu {
             tick: 0,
             tx,
             rx,
+            status: Status::Info("Choose a device, then Enter".into()),
+            casting: None,
+            status_tx,
+            status_rx,
+            live: Live::default(),
         };
         menu.scan();
         menu
+    }
+
+    /// Channel for a new cast thread to report its progress. Replaces the previous one, so a
+    /// stopped cast's late messages (its "ended") are dropped instead of ending the new cast.
+    pub fn status_sender(&mut self) -> Sender<Status> {
+        (self.status_tx, self.status_rx) = mpsc::channel();
+        self.status_tx.clone()
+    }
+
+    /// Current channel, for messages that are not from a cast (screen picker).
+    pub fn current_sender(&self) -> Sender<Status> {
+        self.status_tx.clone()
+    }
+
+    pub fn set_status(&mut self, status: Status) {
+        match status {
+            Status::Player(state) => {
+                if state == "Buffering" && self.live.tv != "Buffering" {
+                    self.live.buffering.push(Instant::now());
+                }
+                self.live.tv = state;
+            }
+            Status::Reconnecting => self.live.reconnects += 1,
+            Status::Segments(dir) => self.live.segments = Some(dir),
+            Status::Served(counter) => self.live.served = Some((counter, None)),
+            Status::Info(_) => self.status = status,
+            Status::Error(_) | Status::Ended => {
+                self.casting = None;
+                self.live.started = None;
+                self.status = status;
+            }
+        }
+    }
+
+    /// Mark the device being cast to; a new cast starts new stats.
+    pub fn set_casting(&mut self, id: Option<String>) {
+        if id.is_some() {
+            self.live = Live { started: Some(Instant::now()), ..Live::default() };
+        }
+        self.casting = id;
+    }
+
+    /// Redraw before a blocking step (portal dialog, stopping).
+    pub fn draw_now(&mut self, terminal: &mut DefaultTerminal, s: &Settings) -> anyhow::Result<()> {
+        terminal.draw(|f| self.draw(f, s))?;
+        Ok(())
     }
 
     /// Browse in a thread; devices show up as they answer.
@@ -107,14 +259,24 @@ impl Menu {
         list
     }
 
-    fn run(&mut self, terminal: &mut DefaultTerminal, s: &mut Settings) -> anyhow::Result<Option<CastDevice>> {
+    /// Draw and handle keys until the user asks for something. `quit` is set by SIGTERM.
+    pub fn next(&mut self, terminal: &mut DefaultTerminal, s: &mut Settings, quit: &AtomicBool) -> anyhow::Result<Action> {
         loop {
+            if quit.load(Ordering::SeqCst) {
+                return Ok(Action::Quit);
+            }
             while let Ok(found) = self.rx.try_recv() {
                 match found {
                     // Keyed by id: a device answers several times.
                     Found::Device(d) => drop(self.devices.insert(d.id.clone(), d)),
                     Found::Done => self.scanning = false,
                 }
+            }
+            while let Ok(status) = self.status_rx.try_recv() {
+                self.set_status(status);
+            }
+            if self.live.started.is_some() {
+                self.live.sample();
             }
             terminal.draw(|f| self.draw(f, s))?;
             self.tick += 1;
@@ -128,7 +290,11 @@ impl Menu {
             let count = if self.on_settings { ROWS.len() } else { self.devices.len() };
             let state = if self.on_settings { &mut self.row } else { &mut self.device };
             match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(None),
+                // Raw mode turns Ctrl+C into a key, not a signal.
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(Action::Quit),
+                KeyCode::Char('q') | KeyCode::Esc => return Ok(Action::Quit),
+                KeyCode::Char('s') if self.casting.is_some() => return Ok(Action::Stop),
+                KeyCode::Char('p') => return Ok(Action::PickScreen),
                 KeyCode::Up | KeyCode::Char('k') if count > 0 => {
                     state.select(Some(state.selected().unwrap_or(0).checked_sub(1).unwrap_or(count - 1)));
                 }
@@ -142,7 +308,7 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     if let Some(device) = self.device.selected().and_then(|i| list.get(i)) {
-                        return Ok(Some((*device).clone()));
+                        return Ok(Action::Cast((*device).clone()));
                     }
                 }
                 _ => {}
@@ -151,9 +317,17 @@ impl Menu {
     }
 
     fn draw(&mut self, f: &mut Frame, s: &Settings) {
-        let [header, body, footer] =
-            Layout::vertical([Constraint::Length(3), Constraint::Min(ROWS.len() as u16 + 2), Constraint::Length(3)])
-                .areas(f.area());
+        let live_height = if self.live.started.is_some() { 6 } else { 0 };
+        let [header, body, live, footer] = Layout::vertical([
+            Constraint::Length(5),
+            Constraint::Min(ROWS.len() as u16 + 2),
+            Constraint::Length(live_height),
+            Constraint::Length(3),
+        ])
+        .areas(f.area());
+        if live_height > 0 {
+            self.draw_live(f, live);
+        }
         let [left, right] = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).areas(body);
 
         let title = Line::from(vec![
@@ -161,14 +335,33 @@ impl Menu {
             Span::raw("  "),
             Span::styled("screen & sound to Chromecast", Style::new().fg(Color::Gray).italic()),
         ]);
-        f.render_widget(Paragraph::new(title).block(rounded(false)), header);
+        let (text, color) = match &self.status {
+            Status::Info(m) => (m.as_str(), if self.casting.is_some() { Color::Green } else { Color::Yellow }),
+            Status::Error(m) => (m.as_str(), Color::Red),
+            // Stats never become the status line (see set_status).
+            _ => ("Stopped", Color::Gray),
+        };
+        // A message ending with "..." is a step in progress: animate it.
+        let text = if text.ends_with("...") {
+            format!("{} {text}", SPINNER[self.tick % SPINNER.len()])
+        } else {
+            text.to_string()
+        };
+        // Status on its own line: errors are long.
+        let status = Line::from(Span::styled(format!(" {text}"), Style::new().fg(color).add_modifier(Modifier::BOLD)));
+        f.render_widget(
+            Paragraph::new(vec![title, status]).wrap(ratatui::widgets::Wrap { trim: false }).block(rounded(false)),
+            header,
+        );
 
         // Devices.
         let mut items: Vec<ListItem> = self
             .list()
             .iter()
             .map(|d| {
+                let live = self.casting.as_deref() == Some(d.id.as_str());
                 ListItem::new(Line::from(vec![
+                    Span::styled(if live { "● " } else { "" }, Style::new().fg(Color::Green)),
                     Span::styled(d.name.clone(), Style::new().bold()),
                     Span::styled(format!("  {}", d.model), Style::new().fg(Color::DarkGray)),
                 ]))
@@ -206,14 +399,72 @@ impl Menu {
             .highlight_style(highlight(self.on_settings));
         f.render_stateful_widget(rows, right, &mut self.row);
 
-        let keys = [("↑↓", "move"), ("←→", "change"), ("Tab", "switch"), ("r", "rescan"), ("Enter", "cast"), ("q", "quit")];
+        let mut keys =
+            vec![("↑↓", "move"), ("←→", "change"), ("Tab", "switch"), ("r", "rescan"), ("p", "screen"), ("Enter", "cast")];
+        if self.casting.is_some() {
+            keys.push(("s", "stop"));
+        }
+        keys.push(("q", "quit"));
         let help: Vec<Span> = keys
             .iter()
             .flat_map(|(key, what)| {
-                [Span::styled(format!(" {key} "), Style::new().fg(Color::Yellow).bold()), Span::raw(format!("{what}  "))]
+                [Span::styled(format!("{key} "), Style::new().fg(Color::Yellow).bold()), Span::raw(format!("{what}  "))]
             })
             .collect();
         f.render_widget(Paragraph::new(Line::from(help)).block(rounded(false)), footer);
+    }
+}
+
+impl Menu {
+    fn draw_live(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let live = &self.live;
+        let [text_area, chart_area] =
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(area);
+        let label = |s: &str| Span::styled(format!("{s:<11}"), Style::new().fg(Color::Gray));
+        let bold = |s: String, color: Color| Span::styled(s, Style::new().fg(color).add_modifier(Modifier::BOLD));
+
+        let elapsed = live.started.map_or(0, |t| t.elapsed().as_secs());
+        let recent = live.buffering.iter().filter(|t| t.elapsed() < Duration::from_secs(60)).count();
+        let tv_color = match live.tv.as_str() {
+            "Playing" => Color::Green,
+            "Buffering" => Color::Yellow,
+            _ => Color::Gray,
+        };
+        let warn = |bad: bool| if bad { Color::Yellow } else { Color::Green };
+        let lines = vec![
+            Line::from(vec![
+                label("Duration"),
+                bold(format!("{:02}:{:02}:{:02}", elapsed / 3600, elapsed / 60 % 60, elapsed % 60), Color::White),
+                Span::raw("   "),
+                label("TV"),
+                bold(if live.tv.is_empty() { "-".into() } else { live.tv.clone() }, tv_color),
+            ]),
+            Line::from(vec![
+                label("Buffering"),
+                bold(format!("{recent} last minute"), warn(recent > 2)),
+                Span::styled(format!(", {} in all", live.buffering.len()), Style::new().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                label("Reconnects"),
+                bold(live.reconnects.to_string(), warn(live.reconnects > 0)),
+            ]),
+            Line::from(vec![
+                label("CPU"),
+                bold(format!("{:.0} % of a core", live.cpu), warn(live.cpu > 150.0)),
+                Span::styled(format!("   load {}", load_average().unwrap_or_default()), Style::new().fg(Color::Gray)),
+            ]),
+        ];
+        f.render_widget(Paragraph::new(lines).block(rounded(false).title(" Live ")), text_area);
+
+        let title = match live.bitrate.last() {
+            Some(rate) => format!(" Bitrate {rate} kbit/s "),
+            None => " Bitrate ".to_string(),
+        };
+        let chart = Sparkline::default()
+            .block(rounded(false).title(title))
+            .data(&live.bitrate)
+            .style(Style::new().fg(ACCENT));
+        f.render_widget(chart, chart_area);
     }
 }
 
@@ -305,7 +556,7 @@ mod tests {
         assert_eq!(value(&s, 0), "Entry-level TV");
         assert_eq!(s.stream.bitrate, 2500);
 
-        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(64, 17)).unwrap();
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 25)).unwrap();
         let mut menu = Menu::new();
         menu.devices.insert("x".into(), CastDevice {
             id: "x".into(),
@@ -314,11 +565,17 @@ mod tests {
             ip: std::net::Ipv4Addr::LOCALHOST,
             port: 8009,
         });
+        menu.set_casting(Some("x".into()));
+        menu.set_status(Status::Player("Playing".into()));
+        menu.set_status(Status::Info("Casting to Living Room TV. Ctrl+C stops.".into()));
+        menu.live.bitrate = vec![2400, 2600, 2500, 3100, 2200, 2500, 2450, 2700, 2500, 2550];
         terminal.draw(|f| menu.draw(f, &s)).unwrap();
-        let screen: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
-        for line in screen.chars().collect::<Vec<_>>().chunks(64) {
-            println!("{}", line.iter().collect::<String>());
+        let screen: Vec<&str> = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        for line in screen.chunks(80) {
+            println!("{}", line.concat());
         }
+        let screen = screen.concat();
         assert!(screen.contains("Living Room TV") && screen.contains("Entry-level TV") && screen.contains("HLS"));
+        assert!(screen.contains("00:00:00") && screen.contains("Bitrate 2550 kbit/s"));
     }
 }
