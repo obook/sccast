@@ -23,7 +23,7 @@ To do:
 - [ ] Stop the screen sharing from the desktop during a cast: the TV must be freed and the error shown
 - [ ] Install each .deb on a clean system of its target and cast
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
-- [ ] First GitHub release with both .deb
+- [x] First GitHub release with both .deb (v0.1.0)
 - [x] Launch menu (ratatui): device list, presets and settings, prefilled from the command line
 - [x] Keep the menu during the cast: state, stats, change settings or device, stop, quit with Ctrl+C
 - [ ] Warn when the PC is too loaded to stream (dropped frames, late segments)
