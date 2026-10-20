@@ -1,12 +1,13 @@
 # sccast
 
 `sccast` casts a Linux desktop's screen and sound to a Chromecast or any
-device with Chromecast built-in, as HLS served over HTTP on your local
-network and played by sccast's own receiver page.
+device with Chromecast built-in. By default it uses Google's screen
+mirroring, the one Chrome and Brave use: about 0.15 s of delay on the TV.
 
-Expect 2 to 3 seconds of delay on the TV, about 5 if sccast falls back to
-Google's receiver. The experimental `--format mirror` uses Google's screen
-mirroring instead, the one Chrome and Brave use: about 0.15 s.
+On a device without screen mirroring, sccast casts in HLS instead, served
+over HTTP on your local network and played by sccast's own receiver page:
+2 to 3 seconds of delay, about 5 if sccast falls back to Google's receiver.
+`--format hls` always uses HLS.
 
 ## Requirements
 
@@ -95,8 +96,8 @@ cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
 chooses another screen, `q` or Ctrl+C quits and frees the TV. Between two
 casts to the same TV, the receiver stays open on it.
 
-`cast` opens the screen picker, waits about 6 seconds for the stream to
-fill, then starts the TV. Ctrl+C stops the TV at once.
+`cast` opens the screen picker, then starts the TV. In HLS it first waits
+about 6 seconds for the stream to fill. Ctrl+C stops the TV at once.
 
 `serve` prints a URL for `ffplay`, to tell a capture problem from a TV
 problem. VLC stutters on this live stream and is not a reliable check.
@@ -109,8 +110,9 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--bitrate KBPS` | `2500` | Video bitrate in kbit/s |
 | `--port N` | `8090` | HTTP port the TV fetches the stream from |
 | `--no-audio` | | Video only |
-| `--format mkv` | `hls` | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
-| `--format mirror` | `hls` | Google's screen mirroring, H.264 and Opus over RTP (experimental, about 0.15 s of delay, `cast` only) |
+| `--format mirror` | `mirror` | Google's screen mirroring, H.264 and Opus over RTP, about 0.15 s of delay. HLS on a device without it |
+| `--format hls` | | 1-second HLS segments, 2 to 3 s of delay. `serve`, `--url` and `--file` always use it |
+| `--format mkv` | | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
 | `--audio-delay MS` | `0` | Delays the sound on the TV (`cast` only) |
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
@@ -168,12 +170,11 @@ Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
 
 ## Limitations
 
-- 2 to 3 seconds of latency: the stream is cut into 1-second segments, and
-  the receiver plays 1 second behind the newest one.
-- The TV loads sccast's receiver from GitHub Pages, so it needs internet
-  access.
-- `--format mirror`: tested on one TV only, no reconnection, `--latency` and
+- Mirror: tested on one TV only, no reconnection, `--latency` and
   `--receiver` ignored. See [docs/cast-streaming.md](docs/cast-streaming.md).
+- HLS: 2 to 3 seconds of latency, as the stream is cut into 1-second
+  segments and the receiver plays 1 second behind the newest one. The TV
+  loads sccast's receiver from GitHub Pages, so it needs internet access.
 
 ## Roadmap
 

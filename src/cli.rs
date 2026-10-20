@@ -87,9 +87,10 @@ pub struct Stream {
     /// No sound.
     #[arg(long)]
     pub no_audio: bool,
-    /// hls: 1-second segments. mkv: one continuous Matroska stream (experimental).
-    /// mirror: Cast Streaming, as Chrome's tab casting, about 0.15 s behind the screen (experimental).
-    #[arg(long, value_enum, default_value_t = Format::Hls)]
+    /// mirror: Cast Streaming, as Chrome's tab casting, about 0.15 s behind the screen; HLS on a
+    /// device without it. hls: 1-second segments, 2 to 3 s. mkv: one Matroska stream (experimental).
+    /// The screen only: serve, --url and --file always use HLS.
+    #[arg(long, value_enum, default_value_t = Format::Mirror)]
     pub format: Format,
 }
 

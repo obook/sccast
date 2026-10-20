@@ -71,9 +71,6 @@ fn main() -> anyhow::Result<()> {
                     bail!("{} is not a file", file.display());
                 }
             }
-            if stream.format == cli::Format::Mirror && (url.is_some() || file.is_some()) {
-                bail!("--format mirror casts the screen only, not --url or --file");
-            }
             let settings = menu::Settings { stream, audio_delay, latency, receiver };
             // In a terminal without --device, the menu picks the device and runs the casts.
             let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -107,9 +104,10 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Serve { test_pattern, stream } => {
+        Command::Serve { test_pattern, mut stream } => {
+            // Mirror streams to a TV only, over RTP: serve plays the same screen in HLS.
             if stream.format == cli::Format::Mirror {
-                bail!("the mirror format streams to a TV only: use `sccast cast --format mirror`");
+                stream.format = cli::Format::Hls;
             }
             let screen = if test_pattern { None } else { Some(capture::ScreenCast::open()?) };
             let stop = stop_flag()?;

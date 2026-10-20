@@ -99,13 +99,16 @@ fn running_time(pipeline: &gst::Element) -> Duration {
 
 /// Mirror `screen` to `device` until `stop`, or until the TV is taken or lost.
 /// The mirroring app is always closed at the end: `keep` of the menu does not apply.
-pub fn cast(device: &Device, s: &menu::Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
+/// Ok(false) when the device has no mirroring receiver: the caller casts in HLS instead.
+pub fn cast(device: &Device, s: &menu::Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<bool> {
     let receiver = out.step(&format!("Starting the mirroring receiver on {}...", device.name), || {
         cast::launch(device, MIRRORING_RECEIVER, false, stop)
     })?;
     if receiver.app_id() != MIRRORING_RECEIVER {
+        // launch() fell back to the Default Media Receiver.
+        tracing::info!(app_id = receiver.app_id(), "no mirroring receiver");
         receiver.close();
-        bail!("{} has no mirroring receiver: use the HLS format", device.name);
+        return Ok(false);
     }
     let session_id = receiver.session_id().to_string();
     // receive() blocks until the next message (up to ~5 s): close the app from a second
@@ -124,7 +127,7 @@ pub fn cast(device: &Device, s: &menu::Settings, screen: &ScreenCast, stop: &'st
     let result = stream(receiver.channel(), device, s, screen, stop, out);
     stop.store(true, Ordering::SeqCst);
     let _ = closer.join();
-    result
+    result.map(|()| true)
 }
 
 fn stream(cast: &CastDevice<'static>, device: &Device, s: &menu::Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {

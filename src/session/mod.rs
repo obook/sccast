@@ -97,9 +97,18 @@ pub fn cast_screen(
     if let Out::Menu(_) = out {
         watch_round_trip(device, stop, out.clone());
     }
-    if s.stream.format == cli::Format::Mirror {
-        return mirror::cast(device, s, screen, stop, out);
-    }
+    let hls_settings;
+    let (s, keep) = if s.stream.format == cli::Format::Mirror {
+        if mirror::cast(device, s, screen, stop, out)? {
+            return Ok(());
+        }
+        out.say(&format!("{} has no screen mirroring: casting in HLS (2 to 3 s of delay).", device.name));
+        hls_settings = menu::Settings { stream: cli::Stream { format: cli::Format::Hls, ..s.stream.clone() }, ..s.clone() };
+        // The menu does not track this receiver (it expected mirror): always close it at the stop.
+        (&hls_settings, None)
+    } else {
+        (s, keep)
+    };
     let reuse = keep.is_some();
     let keep = keep.unwrap_or(&NO_KEEP);
     let stream = &s.stream;
