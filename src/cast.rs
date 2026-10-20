@@ -69,7 +69,15 @@ pub fn launch(device: &Device, app_id: &str) -> anyhow::Result<Receiver> {
     let app = cast
         .receiver
         .launch_app(&CastDeviceApp::Custom(app_id.to_string()))
-        .with_context(|| format!("cannot launch the receiver app {app_id} on {}", device.name))?;
+        .with_context(|| {
+            let hint = if app_id == DEFAULT_MEDIA_RECEIVER {
+                ""
+            } else {
+                ". An unpublished app runs only on devices registered in the Cast console, \
+                 15 minutes and a restart after registration"
+            };
+            format!("cannot launch the receiver app {app_id} on {}{hint}", device.name)
+        })?;
     tracing::info!(session = %app.session_id, app_id, "receiver launched");
     cast.connection.connect(app.transport_id.clone())?;
     Ok(Receiver { cast, app, device: device.clone() })
