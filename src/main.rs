@@ -46,13 +46,12 @@ fn main() -> anyhow::Result<()> {
             let ip = server::lan_ip(device.ip.into())?;
             let port = stream.port;
 
-            let launching = format!("Starting the receiver on {}...", device.name);
             if let Some(url) = url {
-                return spin(&launching, || cast::launch(&device, &app_id))?.play(&url, "video/mp4", false, stop);
+                return launch(&device, &app_id)?.play(&url, "video/mp4", false, stop);
             }
             if let Some(file) = file {
                 server::serve_file(&file, port)?;
-                let receiver = spin(&launching, || cast::launch(&device, &app_id))?;
+                let receiver = launch(&device, &app_id)?;
                 return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop);
             }
 
@@ -60,7 +59,7 @@ fn main() -> anyhow::Result<()> {
             let hls = capture::Hls::start(Some(screen), &stream, Duration::from_millis(audio_delay))?;
             server::serve_hls(hls.dir(), port)?;
             // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
-            let receiver = spin(&launching, || cast::launch(&device, &app_id))?;
+            let receiver = launch(&device, &app_id)?;
             let prepared = spin("Preparing the stream...", || -> anyhow::Result<()> {
                 while hls.segments()? < capture::MIN_SEGMENTS && !stop.load(Ordering::SeqCst) {
                     hls.poll(Duration::from_millis(100))?;
@@ -72,10 +71,17 @@ fn main() -> anyhow::Result<()> {
                 return prepared;
             }
             let capture = hls.watch(stop)?;
-            let mut url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
-            // Read by the custom receiver page; the server ignores the query.
+            // The query is read by sccast's receiver page; the server ignores it.
+            let mut query = Vec::new();
             if let Some(latency) = latency {
-                url.push_str(&format!("?latency={latency}"));
+                query.push(format!("latency={latency}"));
+            }
+            if cfg!(debug_assertions) {
+                query.push("debug".to_string());
+            }
+            let mut url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
+            if !query.is_empty() {
+                url = format!("{url}?{}", query.join("&"));
             }
             let played = receiver.play(&url, "application/x-mpegURL", true, stop);
             stop.store(true, Ordering::SeqCst);
@@ -120,12 +126,13 @@ fn spin<T>(message: &str, f: impl FnOnce() -> T) -> T {
     let done = AtomicBool::new(false);
     std::thread::scope(|s| {
         s.spawn(|| {
-            for frame in ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"].iter().cycle() {
+            // Rotating star: a cross turning by 45 degrees each frame.
+            for frame in ["✚", "✖"].iter().cycle() {
                 if done.load(Ordering::Relaxed) {
                     break;
                 }
                 eprint!("\r{frame} {message}");
-                std::thread::sleep(Duration::from_millis(120));
+                std::thread::sleep(Duration::from_millis(150));
             }
             // Erase the line so the next output starts clean.
             eprint!("\r\x1b[2K");
@@ -137,6 +144,15 @@ fn spin<T>(message: &str, f: impl FnOnce() -> T) -> T {
 }
 
 /// Resolve `--device`, or let the user pick one from the devices found.
+/// Start the receiver on `device`, telling the user when sccast's own fell back to Google's.
+fn launch(device: &discovery::CastDevice, app_id: &str) -> anyhow::Result<cast::Receiver> {
+    let receiver = spin(&format!("Starting the receiver on {}...", device.name), || cast::launch(device, app_id))?;
+    if receiver.app_id() != app_id {
+        eprintln!("The sccast receiver did not start on {}: using Google's receiver (about 5 s of delay).", device.name);
+    }
+    Ok(receiver)
+}
+
 fn pick_device(query: Option<&str>) -> anyhow::Result<discovery::CastDevice> {
     if let Some(query) = query {
         let found = spin(&format!("Looking for {query}..."), || discovery::find(query, DISCOVERY_TIMEOUT))?;

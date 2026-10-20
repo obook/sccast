@@ -32,10 +32,11 @@ pub enum Command {
         /// Delay the sound by this many milliseconds, if it comes before the image on the TV.
         #[arg(long, default_value_t = 0)]
         audio_delay: u64,
-        /// Receiver app id: Google's Default Media Receiver, or a custom one from the Cast console.
-        #[arg(long, default_value = crate::cast::DEFAULT_MEDIA_RECEIVER)]
+        /// Receiver app id. Default: sccast's own (2-3 s of delay), falling back to Google's
+        /// Default Media Receiver CC1AD845 (about 5 s) if it does not start.
+        #[arg(long, default_value = crate::cast::SCCAST_RECEIVER)]
         receiver: String,
-        /// Seconds the custom receiver stays behind live (default set by the receiver page).
+        /// Seconds sccast's receiver stays behind live (default set by the receiver page).
         #[arg(long)]
         latency: Option<f64>,
         #[command(flatten)]
@@ -46,8 +47,8 @@ pub enum Command {
         /// Device name or id. Without it, choose from a list.
         #[arg(long)]
         device: Option<String>,
-        /// Receiver app id to close.
-        #[arg(long, default_value = crate::cast::DEFAULT_MEDIA_RECEIVER)]
+        /// Receiver app id to close (Google's Default Media Receiver is closed too).
+        #[arg(long, default_value = crate::cast::SCCAST_RECEIVER)]
         receiver: String,
     },
     /// Serve the capture as HLS without casting, to check it with ffplay (VLC stutters on it).

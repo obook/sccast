@@ -13,6 +13,8 @@ use crate::discovery::CastDevice as Device;
 
 const RECEIVER: &str = "receiver-0";
 pub const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
+/// sccast's own receiver (docs/receiver/), registered in the Cast console: plays closer to live.
+pub const SCCAST_RECEIVER: &str = "8FE12008";
 // ponytail: counted over the whole cast, not per hour; reset it if long casts hit the cap.
 const MAX_RELOADS: u32 = 3;
 // Idle screen of Chromecasts without Google TV: not an app that took the screen.
@@ -30,7 +32,8 @@ fn connect(device: &Device) -> anyhow::Result<CastDevice<'static>> {
     Ok(cast)
 }
 
-/// Close the receiver app `app_id` on `device`: the session `session`, or whichever one runs.
+/// Close a receiver app on `device`: the session `session`, or whichever of `app_id` and the
+/// Default Media Receiver (its fallback) runs.
 /// Apps launched by other senders (YouTube, Netflix...) are left alone.
 /// Returns false when there was nothing to close.
 pub fn stop(device: &Device, app_id: &str, session: Option<&str>) -> anyhow::Result<bool> {
@@ -38,7 +41,7 @@ pub fn stop(device: &Device, app_id: &str, session: Option<&str>) -> anyhow::Res
     let status = cast.receiver.get_status()?;
     let app = status.applications.iter().find(|a| match session {
         Some(session) => a.session_id == session,
-        None => a.app_id == app_id,
+        None => a.app_id == app_id || a.app_id == DEFAULT_MEDIA_RECEIVER,
     });
     let Some(app) = app else { return Ok(false) };
     cast.receiver.stop_app(app.session_id.clone())?;
@@ -52,7 +55,8 @@ pub struct Receiver {
     device: Device,
 }
 
-/// Launch the receiver app `app_id` on `device` (Default Media Receiver or a custom one).
+/// Launch the receiver app `app_id` on `device`. If a custom receiver does not start
+/// (unknown to the device, page not loading), fall back to the Default Media Receiver.
 /// The TV shows the Cast screen.
 pub fn launch(device: &Device, app_id: &str) -> anyhow::Result<Receiver> {
     let cast = connect(device)?;
@@ -61,29 +65,32 @@ pub fn launch(device: &Device, app_id: &str) -> anyhow::Result<Receiver> {
     // A receiver left running in the background (closed with the TV remote) is reused by
     // LAUNCH without coming back on screen: close it so the TV switches to the new one.
     let status = cast.receiver.get_status()?;
-    if let Some(old) = status.applications.iter().find(|a| a.app_id == app_id) {
+    for old in status.applications.iter().filter(|a| a.app_id == app_id || a.app_id == DEFAULT_MEDIA_RECEIVER) {
         tracing::info!(session = %old.session_id, "closing previous receiver");
         cast.receiver.stop_app(old.session_id.clone())?;
     }
 
-    let app = cast
-        .receiver
-        .launch_app(&CastDeviceApp::Custom(app_id.to_string()))
-        .with_context(|| {
-            let hint = if app_id == DEFAULT_MEDIA_RECEIVER {
-                ""
-            } else {
-                ". An unpublished app runs only on devices registered in the Cast console, \
-                 and a new app takes a while to reach the devices: retry later or restart the device"
-            };
-            format!("cannot launch the receiver app {app_id} on {}{hint}", device.name)
-        })?;
-    tracing::info!(session = %app.session_id, app_id, "receiver launched");
+    let app = match cast.receiver.launch_app(&CastDeviceApp::Custom(app_id.to_string())) {
+        Ok(app) => app,
+        Err(e) if app_id != DEFAULT_MEDIA_RECEIVER => {
+            tracing::warn!("cannot launch the receiver app {app_id}: {e}");
+            cast.receiver
+                .launch_app(&CastDeviceApp::DefaultMediaReceiver)
+                .with_context(|| format!("cannot launch the Default Media Receiver on {}", device.name))?
+        }
+        Err(e) => return Err(e).with_context(|| format!("cannot launch the receiver app {app_id} on {}", device.name)),
+    };
+    tracing::info!(session = %app.session_id, app_id = %app.app_id, "receiver launched");
     cast.connection.connect(app.transport_id.clone())?;
     Ok(Receiver { cast, app, device: device.clone() })
 }
 
 impl Receiver {
+    /// Id of the receiver app that actually runs (differs from the requested one after a fallback).
+    pub fn app_id(&self) -> &str {
+        &self.app.app_id
+    }
+
     /// Close the receiver app, freeing the TV.
     pub fn close(&self) {
         if let Err(e) = self.cast.receiver.stop_app(self.app.session_id.clone()) {
