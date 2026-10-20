@@ -488,7 +488,8 @@ impl Menu {
                 [Span::styled(format!("{key} "), Style::new().fg(Color::Yellow).bold()), Span::raw(format!("{what}  "))]
             })
             .collect();
-        f.render_widget(Paragraph::new(Line::from(help)).block(rounded(false)), footer);
+        let author = Line::from(Span::styled(" (C) Olivier Booklage ", Style::new().fg(Color::Gray))).right_aligned();
+        f.render_widget(Paragraph::new(Line::from(help)).block(rounded(false).title_bottom(author)), footer);
     }
 }
 
