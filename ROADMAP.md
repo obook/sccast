@@ -36,7 +36,8 @@ If needed:
 2 to 3 s is enough for now. Ideas kept for later:
 
 - [ ] Segments shorter than 1 s (`hlssink2` cannot: its target duration is a whole number of seconds)
-- [ ] Progressive fragmented MP4 instead of HLS
+- [x] Continuous Matroska stream (`--format mkv`): plays, but 5 to 6 s of delay, the TV's native player keeps its own buffer
+- [ ] Progressive fragmented MP4 instead of HLS (likely the same buffering as Matroska, not checked)
 - [ ] WebRTC in the receiver page (not checked)
 
 ## Stage 2: Cast Streaming
