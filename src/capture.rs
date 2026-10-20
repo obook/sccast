@@ -6,33 +6,51 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use tempfile::TempDir;
 
+use crate::portal::ScreenCast;
+
 pub const PLAYLIST: &str = "live.m3u8";
+
+// Letterbox to 1080p30 whatever the screen size; I420 is what profile High accepts.
+const RAW_CAPS: &str = "video/x-raw,format=I420,width=1920,height=1080,pixel-aspect-ratio=1/1,framerate=30/1";
 
 // Keyframe every second (30 frames): segments cannot be shorter than the keyframe interval.
 // Profile High with the encoder's auto level stays within 4.1 at 1080p30.
-const PIPELINE: &str = "videotestsrc is-live=true \
-    ! video/x-raw,width=1920,height=1080,framerate=30/1 \
-    ! videoconvert \
-    ! x264enc tune=zerolatency speed-preset=veryfast key-int-max=30 bitrate=4000 \
+const ENCODE: &str = "x264enc tune=zerolatency speed-preset=veryfast key-int-max=30 bitrate=4000 \
     ! video/x-h264,profile=high \
     ! h264parse \
     ! hlssink2 name=sink target-duration=1 playlist-length=3 max-files=6";
 
 /// Running capture pipeline writing HLS into a temporary directory.
-/// Dropping it stops the pipeline, then deletes the directory.
+/// Dropping it stops the pipeline, then deletes the directory and closes the portal session.
 pub struct Hls {
     pipeline: gst::Element,
     dir: TempDir,
+    _screen: Option<ScreenCast>,
 }
 
 impl Hls {
-    pub fn start() -> anyhow::Result<Self> {
+    /// Capture `screen`, or a test pattern when it is None.
+    pub fn start(screen: Option<ScreenCast>) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
         let dir = tempfile::Builder::new().prefix("sccast-").tempdir_in(base)?;
 
-        let pipeline = gst::parse::launch(PIPELINE).context("cannot build pipeline (missing GStreamer plugin?)")?;
+        let source = match &screen {
+            None => "videotestsrc is-live=true".to_string(),
+            // `path` takes the node id; `target-object` wants the node serial, which the portal does not give.
+            // PipeWire only sends frames on screen damage: keepalive resends the last one so a still
+            // screen keeps producing segments, and videorate turns it into a constant 30 fps.
+            Some(screen) => format!(
+                "pipewiresrc fd={} path={} do-timestamp=true keepalive-time=100 ! videorate",
+                screen.fd(),
+                screen.node_id
+            ),
+        };
+        let description = format!("{source} ! videoconvert ! videoscale ! {RAW_CAPS} ! {ENCODE}");
+        tracing::debug!(%description, "pipeline");
+
+        let pipeline = gst::parse::launch(&description).context("cannot build pipeline (missing GStreamer plugin?)")?;
         let sink = pipeline
             .downcast_ref::<gst::Bin>()
             .and_then(|bin| bin.by_name("sink"))
@@ -42,7 +60,7 @@ impl Hls {
 
         pipeline.set_state(gst::State::Playing)?;
         tracing::info!(dir = %dir.path().display(), "capture started");
-        Ok(Self { pipeline, dir })
+        Ok(Self { pipeline, dir, _screen: screen })
     }
 
     pub fn dir(&self) -> &Path {

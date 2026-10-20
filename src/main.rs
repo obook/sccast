@@ -2,6 +2,7 @@ mod capture;
 mod cast;
 mod cli;
 mod discovery;
+mod portal;
 mod server;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,11 +56,9 @@ fn main() -> anyhow::Result<()> {
             cast::play_url(&device, &url, "video/mp4", stop_flag()?)
         }
         Command::Serve { test_pattern } => {
-            if !test_pattern {
-                bail!("screen capture is not implemented yet (J5): use --test-pattern");
-            }
+            let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };
             let stop = stop_flag()?;
-            let hls = capture::Hls::start()?;
+            let hls = capture::Hls::start(screen)?;
             server::serve_hls(hls.dir(), HTTP_PORT)?;
             println!("http://localhost:{HTTP_PORT}/{}", capture::PLAYLIST);
             while !stop.load(Ordering::SeqCst) {
