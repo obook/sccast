@@ -2,10 +2,10 @@
 
 `sccast` casts a Linux desktop's screen and sound to a Chromecast or any
 device with Chromecast built-in, as HLS served over HTTP on your local
-network and played by Google's Default Media Receiver.
+network and played by sccast's own receiver page.
 
 It does not use Google's screen mirroring, the one Chrome and Brave use.
-Expect about 5 seconds of delay on the TV.
+Expect 2 to 3 seconds of delay on the TV.
 
 ## Requirements
 
@@ -90,21 +90,24 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
 
-## Custom receiver (experimental)
+## Receiver
 
-`docs/receiver/` is a receiver page that plays closer to live than the
-Default Media Receiver and shows the delay in a corner of the TV. It is
-served at <https://obook.github.io/sccast/receiver/>.
+The TV runs sccast's receiver, the page in `docs/receiver/` served at
+<https://obook.github.io/sccast/receiver/> and published in the Google Cast
+console as application `8FE12008`. It plays 1 second behind the newest
+segment, against 3 for Google's Default Media Receiver.
 
-1. Register at the [Google Cast SDK Developer Console](https://cast.google.com/publish)
-   ($5, once).
-2. Add an application of type Custom Receiver with the page URL above.
-   Note its application ID.
-3. Add your TV under Devices with its serial number. Wait 15 minutes, then
-   unplug the TV or Chromecast and plug it back in.
-4. `sccast cast --receiver <application ID>`
+If it does not start, `sccast` falls back to the Default Media Receiver
+(about 5 seconds of delay) and says so. A device may not know the
+application until it has been restarted once.
 
-An unpublished application only runs on the devices registered in step 3.
+| Option | Effect |
+|---|---|
+| `--latency SECONDS` | Delay behind the newest segment for sccast's receiver |
+| `--receiver CC1AD845` | Always use the Default Media Receiver |
+| `--receiver ID` | Use your own receiver, registered in the [Cast console](https://cast.google.com/publish) |
+
+A debug build (`cargo build`) shows the delay in a corner of the TV.
 
 ## Troubleshooting
 
@@ -117,7 +120,7 @@ stream.
 "refused the stream": the device cannot decode the format. A Google Nest
 Hub plays `--resolution 1280x720` but refuses 1080p.
 
-Sound before image: the PC speakers play live, 5 seconds ahead of the TV.
+Sound before image: the PC speakers play live, a few seconds ahead of the TV.
 Turn them down with their hardware knob; muting the PC in the desktop also
 mutes the stream. If the TV sound leads its image, add `--audio-delay 200`
 and adjust.
@@ -130,9 +133,10 @@ Logs: `RUST_LOG=sccast=debug sccast cast`.
 
 ## Limitations
 
-- About 5 seconds of latency: the TV buffers a few HLS segments before it
-  plays them.
-- The Default Media Receiver draws a "LIVE" badge.
+- 2 to 3 seconds of latency: the stream is cut into 1-second segments, and
+  the receiver plays 1 second behind the newest one.
+- The TV loads sccast's receiver from GitHub Pages, so it needs internet
+  access.
 
 ## Author
 
