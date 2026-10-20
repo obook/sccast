@@ -60,7 +60,8 @@ Notes in [docs/cast-streaming.md](docs/cast-streaming.md).
 - [ ] ~~Build `cast_sender` from openscreen~~: dropped, our own sender was simpler
 - [x] Python prototype (`proto/`)
 - [x] Rust sender, `--format mirror`, with sound: 153 ms on the Sharp
-- [ ] Test from the menu: Enter, `s`, `q`, closing the terminal
+- [x] Test from the menu: Enter, `s`, `q`, closing the terminal
+- [x] Screen mirroring by default, HLS on a device without it (fallback not tested)
 - [ ] Test on a Chromecast dongle and a Nest Hub
 - [ ] Reconnect when the TV drops the session
 - [ ] Tune the bitrate steps and the target delay (100 ms) on a lossy network
