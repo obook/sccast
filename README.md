@@ -87,6 +87,7 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--bitrate KBPS` | `4000` | Video bitrate in kbit/s |
 | `--port N` | `8090` | HTTP port the TV fetches the stream from |
 | `--no-audio` | | Video only |
+| `--format mkv` | `hls` | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
 | `--audio-delay MS` | `0` | Delays the sound on the TV (`cast` only) |
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
@@ -122,9 +123,12 @@ stream.
 Hub plays `--resolution 1280x720` but refuses 1080p.
 
 Sound before image: the PC speakers play live, a few seconds ahead of the TV.
-Turn them down with their hardware knob; muting the PC in the desktop also
-mutes the stream. If the TV sound leads its image, add `--audio-delay 200`
-and adjust.
+Mute the PC in the desktop: on PipeWire, the stream keeps its sound (checked
+on KDE neon). If the TV sound leads its image, add `--audio-delay 200` and
+adjust.
+
+Stutter, or sound ahead of a frozen image, on moving content: the TV may not
+decode 1080p in real time. Try `--resolution 1280x720 --bitrate 2500`.
 
 The TV drops back to its home screen: `sccast` launches the receiver again,
 up to 3 times in 5 minutes. If the device no longer shows in `sccast list`,
