@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
 use rust_cast::channels::media::{IdleReason, Media, MediaResponse, PlayerState, StreamType};
 use rust_cast::channels::receiver::{Application, CastDeviceApp, ReceiverResponse};
@@ -13,6 +15,12 @@ const RECEIVER: &str = "receiver-0";
 const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
 // ponytail: counted over the whole cast, not per hour; reset it if long casts hit the cap.
 const MAX_RELOADS: u32 = 3;
+// Idle screen of Chromecasts without Google TV: not an app that took the screen.
+const BACKDROP: &str = "E8C28D3C";
+const MAX_RECONNECTS: u32 = 3;
+// A drop this long after the previous one starts a new count.
+const RECONNECT_WINDOW: Duration = Duration::from_secs(300);
+const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 fn connect(device: &Device) -> anyhow::Result<CastDevice<'static>> {
     // Chromecasts use self-signed certificates.
@@ -71,48 +79,100 @@ impl Receiver {
         }
     }
 
-    /// Play `url` and block until playback ends, the app is closed elsewhere, or `stop` is set.
+    /// Play `url` and block until playback ends, the TV is taken by another sender, or `stop` is set.
+    /// If the device drops the session, launch the receiver again and resume.
     /// `live` tells the receiver not to buffer ahead (HLS capture).
     pub fn play(self, url: &str, content_type: &str, live: bool, stop: &'static AtomicBool) -> anyhow::Result<()> {
-        let Receiver { cast, app, device } = self;
-        play(&cast, &app, &device, url, content_type, live, stop)
+        let mut receiver = self;
+        // receive() blocks until the next message (up to ~5 s): close the app
+        // from a second connection so Ctrl+C frees the TV at once.
+        let session = Arc::new(Mutex::new(receiver.app.session_id.clone()));
+        let watcher = {
+            let device = receiver.device.clone();
+            let session = Arc::clone(&session);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                tracing::info!("stopping");
+                let session = session.lock().unwrap().clone();
+                if let Err(e) = self::stop(&device, Some(&session)) {
+                    tracing::warn!("cannot close the receiver app: {e:#}");
+                }
+            })
+        };
+
+        let media = Media {
+            content_id: url.to_string(),
+            stream_type: if live { StreamType::Live } else { StreamType::Buffered },
+            content_type: content_type.to_string(),
+            metadata: None,
+            duration: None,
+        };
+        let device = receiver.device.clone();
+        let mut drops = 0;
+        let mut last_drop = Instant::now();
+        loop {
+            let mut why = match play_session(&receiver.cast, &receiver.app, &device, &media, live, &watcher)? {
+                Outcome::Ended => return Ok(()),
+                Outcome::Lost(why) => why,
+            };
+            loop {
+                // Ctrl+C also closes the session: not a drop.
+                if stop.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                tracing::warn!(%why, "session lost");
+                if last_drop.elapsed() > RECONNECT_WINDOW {
+                    drops = 0;
+                }
+                drops += 1;
+                last_drop = Instant::now();
+                if drops > MAX_RECONNECTS {
+                    anyhow::bail!(
+                        "lost {} ({why}), gave up after {MAX_RECONNECTS} reconnections. \
+                         If it no longer shows in `sccast list`, unplug it and plug it back in",
+                        device.name
+                    );
+                }
+                eprintln!("Lost {} ({why}). Reconnecting ({drops}/{MAX_RECONNECTS})...", device.name);
+                std::thread::sleep(RECONNECT_DELAY);
+                match launch(&device) {
+                    Ok(new) => {
+                        receiver = new;
+                        *session.lock().unwrap() = receiver.app.session_id.clone();
+                        break;
+                    }
+                    Err(e) => why = format!("{e:#}"),
+                }
+            }
+            if stop.load(Ordering::SeqCst) {
+                receiver.close();
+                return Ok(());
+            }
+        }
     }
 }
 
-fn play(
+/// Why a playback session stopped.
+enum Outcome {
+    /// Playback is over: it ended, was stopped, or another sender took the TV.
+    Ended,
+    /// The device dropped the session: connection lost or receiver closed.
+    Lost(String),
+}
+
+fn play_session(
     cast: &CastDevice<'static>,
     app: &Application,
     device: &Device,
-    url: &str,
-    content_type: &str,
+    media: &Media,
     live: bool,
-    stop: &'static AtomicBool,
-) -> anyhow::Result<()> {
-    // receive() below blocks until the next message (up to ~5 s): close the app
-    // from a second connection so Ctrl+C frees the TV at once.
-    let watcher = {
-        let device = device.clone();
-        let session = app.session_id.clone();
-        std::thread::spawn(move || {
-            while !stop.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            tracing::info!("stopping");
-            if let Err(e) = self::stop(&device, Some(&session)) {
-                tracing::warn!("cannot close the receiver app: {e:#}");
-            }
-        })
-    };
-
-    let media = Media {
-        content_id: url.to_string(),
-        stream_type: if live { StreamType::Live } else { StreamType::Buffered },
-        content_type: content_type.to_string(),
-        metadata: None,
-        duration: None,
-    };
+    watcher: &std::thread::JoinHandle<()>,
+) -> anyhow::Result<Outcome> {
+    let url = &media.content_id;
     let load = || -> anyhow::Result<i32> {
-        let loaded = cast.media.load(app.transport_id.clone(), app.session_id.clone(), &media)?;
+        let loaded = cast.media.load(app.transport_id.clone(), app.session_id.clone(), media)?;
         let media_session = loaded
             .entries
             .first()
@@ -133,7 +193,7 @@ fn play(
     let mut app_seen = false;
     loop {
         if watcher.is_finished() {
-            return Ok(());
+            return Ok(Outcome::Ended);
         }
         let message = match cast.receive() {
             Ok(message) => message,
@@ -143,10 +203,17 @@ fn play(
                 tracing::warn!("unreadable message from the device: {e}");
                 continue;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Ok(Outcome::Lost(e.to_string())),
         };
         match message {
-            ChannelMessage::Heartbeat(HeartbeatResponse::Ping) => cast.heartbeat.pong()?,
+            ChannelMessage::Heartbeat(HeartbeatResponse::Ping) => {
+                if let Err(e) = cast.heartbeat.pong() {
+                    return Ok(Outcome::Lost(e.to_string()));
+                }
+            }
+            ChannelMessage::Connection(ConnectionResponse::Close) => {
+                return Ok(Outcome::Lost("connection closed by the device".into()));
+            }
             ChannelMessage::Media(MediaResponse::Status(status)) => {
                 // Skip statuses of the media we replaced (e.g. its IDLE/INTERRUPTED).
                 let current = media_session;
@@ -165,7 +232,7 @@ fn play(
                         }
                         // Otherwise the TV stays on the Cast splash screen.
                         close_app();
-                        return Ok(());
+                        return Ok(Outcome::Ended);
                     }
                 }
             }
@@ -185,8 +252,12 @@ fn play(
                 // disappearance after it was seen running means it was closed.
                 let running = status.applications.iter().any(|a| a.session_id == app.session_id);
                 if app_seen && !running {
-                    tracing::info!("receiver app closed");
-                    return Ok(());
+                    // Another app on screen: someone cast over us, leave the TV to them.
+                    if let Some(other) = status.applications.iter().find(|a| a.app_id != BACKDROP) {
+                        tracing::info!(app = %other.display_name, "receiver replaced");
+                        return Ok(Outcome::Ended);
+                    }
+                    return Ok(Outcome::Lost("receiver closed".into()));
                 }
                 app_seen |= running;
             }
