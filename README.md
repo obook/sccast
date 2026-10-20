@@ -13,11 +13,22 @@ Google's receiver.
 - A Wayland session with `xdg-desktop-portal` (tested on KDE Plasma).
 - PipeWire, with `pipewire-pulse` for sound.
 - GStreamer (tested with 1.24).
-- A Rust toolchain (`cargo`).
+- A Rust toolchain (`cargo`), only to build from source.
 - Linux PC and TV with Chromecast built-in or Google Chromecast device on the same local network, mDNS (UDP 5353) allowed between
   them.
 
 ## Install
+
+KDE neon and Ubuntu 26.04: download the `.deb` for your system from the
+[latest release](https://github.com/obook/sccast/releases/latest), then:
+
+```sh
+sudo apt install ./sccast_*_amd64.deb
+```
+
+`apt` installs the GStreamer plugins it needs.
+
+### Build from source
 
 Debian, Ubuntu and derivatives (tested on KDE neon 24.04):
 
