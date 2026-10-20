@@ -56,7 +56,7 @@ pub fn find(query: &str, timeout: Duration) -> anyhow::Result<Option<CastDevice>
 }
 
 /// Call `on_device` for each resolved device until it returns true or `timeout` expires.
-fn browse(timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<()> {
+pub fn browse(timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<()> {
     let mdns = ServiceDaemon::new()?;
     let events = mdns.browse(SERVICE_TYPE)?;
     let deadline = Instant::now() + timeout;

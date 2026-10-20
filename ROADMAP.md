@@ -24,6 +24,9 @@ To do:
 - [ ] Install each .deb on a clean system of its target and cast
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
 - [ ] First GitHub release with both .deb
+- [x] Launch menu (ratatui): device list, presets and settings, prefilled from the command line
+- [ ] Keep the menu during the cast: state, change settings or device, stop, quit with Ctrl+C
+- [ ] Warn when the PC is too loaded to stream (dropped frames, late segments)
 
 If needed:
 

@@ -2,6 +2,7 @@ mod capture;
 mod cast;
 mod cli;
 mod discovery;
+mod menu;
 mod portal;
 mod server;
 
@@ -22,7 +23,9 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    match Cli::parse().command {
+    // `sccast` alone opens the cast menu.
+    let cli = if std::env::args_os().len() == 1 { Cli::parse_from(["sccast", "cast"]) } else { Cli::parse() };
+    match cli.command {
         Command::List { timeout } => {
             let devices = spin(SEARCHING, || discovery::discover(Duration::from_secs(timeout)))?;
             if devices.is_empty() {
@@ -40,7 +43,16 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             // Find the device before the portal dialog, so a typo fails fast.
-            let device = pick_device(device.as_deref())?;
+            // In a terminal without --device, the menu picks it and adjusts the settings.
+            let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+            let (device, audio_delay, latency, app_id, stream) = if device.is_none() && interactive {
+                let mut settings = menu::Settings { stream, audio_delay, latency, receiver: app_id };
+                let Some(device) = menu::run(&mut settings)? else { return Ok(()) };
+                let menu::Settings { stream, audio_delay, latency, receiver } = settings;
+                (device, audio_delay, latency, receiver, stream)
+            } else {
+                (pick_device(device.as_deref())?, audio_delay, latency, app_id, stream)
+            };
             tracing::info!(name = %device.name, ip = %device.ip, "casting");
             let stop = stop_flag()?;
             let ip = server::lan_ip(device.ip.into())?;

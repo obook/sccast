@@ -64,6 +64,7 @@ Replace `192.168.1.0/24` with your network.
 ## Usage
 
 ```sh
+sccast                                       # menu: device, presets and settings
 sccast list                                  # devices on the network
 sccast cast                                  # pick a device, then a screen
 sccast cast --device "Living Room TV"        # name or id from `sccast list`
@@ -72,6 +73,10 @@ sccast cast --device "Kitchen" --file movie.mp4
 sccast stop --device "Kitchen"               # close a cast left running
 sccast serve                                 # local stream, no TV
 ```
+
+In a terminal, `sccast` and `cast` without `--device` open a menu: the
+devices appear as they answer, and the command line options prefill the
+settings. Arrows move and change, Tab switches columns, Enter casts.
 
 `cast` opens the screen picker, waits about 6 seconds for the stream to
 fill, then starts the TV. Ctrl+C stops the TV at once.
