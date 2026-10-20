@@ -74,6 +74,8 @@ sccast stop --device "Kitchen"               # close a cast left running
 sccast serve                                 # local stream, no TV
 ```
 
+![The sccast menu during a cast](media/menu.png)
+
 In a terminal, `sccast` and `cast` without `--device` ask for the screen,
 then open a menu: the devices appear as they answer, and the command line
 options prefill the settings. Arrows move and change, Tab switches columns,

@@ -563,7 +563,7 @@ mod tests {
 
         // Made-up devices: no network search, so no real device shows up.
         let mut menu = Menu::idle();
-        let fake = [("tv", "Living Room TV", "Chromecast"), ("hub", "Kitchen", "Google Nest Hub"), ("pj", "Classroom", "Chromecast with Google TV")];
+        let fake = [("tv", "Living Room TV", "Chromecast"), ("hub", "Kitchen", "Google Nest Hub"), ("pj", "Classroom", "Google TV")];
         for (id, name, model) in fake {
             let device = CastDevice {
                 id: id.into(),
@@ -616,7 +616,7 @@ mod tests {
         };
         let mut out = String::from(
             "<!doctype html><meta charset=utf-8><body style=\"margin:0;background:#1e1e2e\">\
-             <pre style=\"margin:16px;font:16px/1.25 'DejaVu Sans Mono',monospace;color:#cdd6f4\">",
+             <pre style=\"margin:16px;font:16px/1.15 'DejaVu Sans Mono',monospace;color:#cdd6f4\">",
         );
         for (i, cell) in buffer.content().iter().enumerate() {
             if i > 0 && i % buffer.area.width as usize == 0 {
