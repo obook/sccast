@@ -16,7 +16,7 @@ Done:
 
 To do:
 
-- [ ] Test on the school Chromecast and on a Nest Hub
+- [ ] Test on the school Chromecast and on a Nest Hub (one accepted a 5 s session)
 - [ ] Test the HLS fallback on a device without mirroring
 - [ ] Test with a firewall on (ufw, firewalld)
 - [ ] Reconnect when the TV drops the session

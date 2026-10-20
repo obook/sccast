@@ -175,7 +175,7 @@ Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
 
 ## Limitations
 
-- Mirror: tested on one TV only, no reconnection, `--latency` and
+- Mirror: tested on one TV only (a Nest Hub accepted it once), no reconnection, `--latency` and
   `--receiver` ignored. See [docs/cast-streaming.md](docs/cast-streaming.md).
 - HLS: 2 to 3 seconds of latency, as the stream is cut into 1-second
   segments and the receiver plays 1 second behind the newest one. The TV
