@@ -1,12 +1,11 @@
 [package]
-name = "screencast-cc"
+name = "sccast"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-
-[[bin]]
-name = "sccast"
-path = "src/main.rs"
+authors = ["Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"]
+description = "Cast your Linux desktop to a Chromecast"
+repository = "https://github.com/obook/sccast"
 
 [dependencies]
 anyhow = "1.0.104"
