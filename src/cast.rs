@@ -183,6 +183,14 @@ impl Receiver {
             };
             let mut why = match play_session(&receiver.cast, &receiver.app, &device, &media, live, &watcher, &track)? {
                 Outcome::Ended => return Ok(()),
+                // Otherwise the TV stays on the Cast splash screen. Kept open when the menu
+                // stopped the media itself (s, or Enter to cast again).
+                Outcome::Idle => {
+                    if !keep.load(Ordering::SeqCst) {
+                        receiver.close();
+                    }
+                    return Ok(());
+                }
                 Outcome::Lost(why) => why,
             };
             loop {
@@ -237,8 +245,10 @@ pub enum Report<'a> {
 
 /// Why a playback session stopped.
 enum Outcome {
-    /// Playback is over: it ended, was stopped, or another sender took the TV.
+    /// Another sender took the TV, or a media error closed the app.
     Ended,
+    /// The player went idle: playback ended or was stopped (TV remote, or sccast itself).
+    Idle,
     /// The device dropped the session: connection lost or receiver closed.
     Lost(String),
 }
@@ -327,9 +337,7 @@ fn play_session(
                             media_session = load()?;
                             break;
                         }
-                        // Otherwise the TV stays on the Cast splash screen.
-                        close_app();
-                        return Ok(Outcome::Ended);
+                        return Ok(Outcome::Idle);
                     }
                 }
             }
