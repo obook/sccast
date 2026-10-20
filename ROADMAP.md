@@ -32,6 +32,7 @@ To do:
 - [ ] Tune the alert thresholds on the school network
 - [x] Warning on the TV, top right, with sccast's receiver: network too slow (Shaka's bandwidth estimate against the stream bitrate) or frequent buffering
 - [ ] Check the TV warning on a congested network (school)
+- [ ] Unpublish the receiver in the Google Cast console and check the fallback to Google's receiver
 
 If needed:
 
