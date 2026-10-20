@@ -139,6 +139,10 @@ Logs: `RUST_LOG=sccast=debug sccast cast`.
 - The TV loads sccast's receiver from GitHub Pages, so it needs internet
   access.
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md).
+
 ## Author
 
 Olivier Booklage <olivier.booklage@ac-bordeaux.fr>
