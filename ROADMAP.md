@@ -71,7 +71,8 @@ Done:
 
 To do:
 
-- [ ] Install the v0.3.0 .deb on a clean system of each target and cast
+- [x] Install the v0.3.0 .deb on another KDE neon PC and cast
+- [ ] Install the v0.3.0 .deb on Ubuntu 26.04 and cast
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
 - [ ] Cast for one hour without a cut
 - [ ] Stop the screen sharing from the desktop during a cast: the TV must be freed and the error shown
