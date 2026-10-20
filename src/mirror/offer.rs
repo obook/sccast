@@ -1,7 +1,7 @@
 //! offer.rs
 //! Start of a mirroring session: sccast sends an OFFER (streams, codecs, keys) on the Cast
 //! control channel, the TV replies with an ANSWER (UDP port, streams it accepts).
-//! mirror.rs then sends the streams to that port.
+//! mod.rs then sends the streams to that port.
 //!
 //! Author: O. Booklage
 //! Date: October 2026

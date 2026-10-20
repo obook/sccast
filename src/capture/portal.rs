@@ -1,7 +1,7 @@
 //! portal.rs
 //! Ask the desktop which screen or window to share, through the XDG ScreenCast portal.
 //! Wayland lets no program read the screen directly: the portal returns a PipeWire node
-//! that capture.rs reads.
+//! that the capture pipeline (mod.rs) reads.
 //!
 //! Author: O. Booklage
 //! Date: October 2026

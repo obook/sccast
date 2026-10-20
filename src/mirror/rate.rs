@@ -1,6 +1,6 @@
 //! rate.rs
 //! Video bitrate of the mirror format, following the receiver's loss reports.
-//! mirror.rs feeds it the loss share of each Receiver Report and sets the encoder's bitrate.
+//! send.rs feeds it the loss share of each Receiver Report and sets the encoder's bitrate.
 //!
 //! Author: O. Booklage
 //! Date: October 2026

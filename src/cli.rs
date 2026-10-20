@@ -1,3 +1,11 @@
+//! cli.rs
+//! Command line options (clap): the commands list, cast, stop and serve, and the stream
+//! settings they share. The menu starts from these values.
+//!
+//! Author: O. Booklage
+//! Date: October 2026
+//! Licence: MIT
+
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
@@ -34,7 +42,7 @@ pub enum Command {
         audio_delay: u64,
         /// Receiver app id. Default: sccast's own (2-3 s of delay), falling back to Google's
         /// Default Media Receiver CC1AD845 (about 5 s) if it does not start.
-        #[arg(long, default_value = crate::cast::SCCAST_RECEIVER)]
+        #[arg(long, default_value = crate::device::SCCAST_RECEIVER)]
         receiver: String,
         /// Seconds sccast's receiver stays behind live (default set by the receiver page).
         #[arg(long)]
@@ -48,7 +56,7 @@ pub enum Command {
         #[arg(long)]
         device: Option<String>,
         /// Receiver app id to close (Google's Default Media Receiver is closed too).
-        #[arg(long, default_value = crate::cast::SCCAST_RECEIVER)]
+        #[arg(long, default_value = crate::device::SCCAST_RECEIVER)]
         receiver: String,
     },
     /// Serve the capture as HLS without casting, to check it with ffplay (VLC stutters on it).

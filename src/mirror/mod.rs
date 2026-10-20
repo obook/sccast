@@ -1,4 +1,4 @@
-//! mirror.rs
+//! mirror/
 //! Mirror format (`--format mirror`): H.264 and Opus over encrypted RTP to Google's
 //! mirroring receiver, about 150 ms behind the screen instead of 2 to 3 s with HLS.
 //! offer.rs opens the session, send.rs runs its threads, rtp.rs builds the packets,
@@ -30,9 +30,10 @@ use rust_cast::channels::receiver::ReceiverResponse;
 use rust_cast::{CastDevice, ChannelMessage};
 
 use crate::capture::Capture;
-use crate::discovery::CastDevice as Device;
-use crate::portal::ScreenCast;
-use crate::{cast, menu, Out};
+use crate::capture::ScreenCast;
+use crate::device::{self as cast, CastDevice as Device};
+use crate::menu;
+use crate::session::Out;
 use offer::{offer, wait_answer};
 use rtp::{Keys, RtpStream};
 use send::{feedback, send_frames};
@@ -172,7 +173,7 @@ fn stream(cast: &CastDevice<'static>, device: &Device, s: &menu::Settings, scree
     let watcher = capture.watch(stop)?;
 
     // Segment times of an earlier HLS cast would show in the stats.
-    crate::server::forget_fetches();
+    crate::hls::forget_fetches();
     out.send(menu::Status::Dropped(Arc::clone(&capture.dropped)));
     // Weak: the menu keeps the counter after the cast, the socket and packets must not stay.
     let counted = Arc::downgrade(&session);

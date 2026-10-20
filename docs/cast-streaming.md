@@ -24,8 +24,8 @@ only reads files.
 
 ## Code
 
-- `src/mirror.rs` and `src/mirror/`: the sender (OFFER and ANSWER, RTP, RTCP, bitrate).
-- `src/capture.rs`: same capture as HLS, ending in `appsink`.
+- `src/mirror/`: the sender (OFFER and ANSWER, RTP, RTCP, bitrate).
+- `src/capture/`: same capture as HLS, ending in `appsink`.
 - `proto/`: the Python prototype used to check the protocol first.
 
 ## Measures on the Sharp
