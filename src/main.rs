@@ -55,8 +55,7 @@ fn main() -> anyhow::Result<()> {
 
             let hls = capture::Hls::start(Some(portal::ScreenCast::open()?))?;
             server::serve_hls(hls.dir(), HTTP_PORT)?;
-            // The receiver gives up on a playlist with fewer than two segments.
-            while hls.segments()? < 2 {
+            while hls.segments()? < capture::MIN_SEGMENTS {
                 if stop.load(Ordering::SeqCst) {
                     return Ok(());
                 }
@@ -66,6 +65,13 @@ fn main() -> anyhow::Result<()> {
             // from a thread if a capture failure ever leaves the TV frozen.
             let url = format!("http://{ip}:{HTTP_PORT}/{}", capture::PLAYLIST);
             cast::play_url(&device, &url, "application/x-mpegURL", true, stop)
+        }
+        Command::Stop { device } => {
+            let device = pick_device(device.as_deref())?;
+            if !cast::stop(&device, None)? {
+                println!("nothing to stop on {}", device.name);
+            }
+            Ok(())
         }
         Command::Serve { test_pattern } => {
             let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };

@@ -30,6 +30,12 @@ pub enum Command {
         #[arg(long)]
         file: Option<PathBuf>,
     },
+    /// Close the media receiver left running on a device.
+    Stop {
+        /// Device name or id.
+        #[arg(long)]
+        device: Option<String>,
+    },
     /// Serve the capture as HLS without casting, to check it with ffplay or VLC.
     Serve {
         /// Capture a test pattern instead of the screen.
