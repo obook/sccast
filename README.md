@@ -72,8 +72,9 @@ sccast serve                                 # local stream, no TV
 `cast` opens the screen picker, waits about 6 seconds for the stream to
 fill, then starts the TV. Ctrl+C stops the TV at once.
 
-`serve` prints a URL for `ffplay` or VLC, to tell a capture problem from a
-TV problem. `serve --test-pattern` streams a test image and ticks instead.
+`serve` prints a URL for `ffplay`, to tell a capture problem from a TV
+problem. VLC stutters on this live stream and is not a reliable check.
+`serve --test-pattern` streams a test image and ticks instead.
 
 | Option | Default | Effect |
 |---|---|---|

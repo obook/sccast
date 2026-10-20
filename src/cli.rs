@@ -41,7 +41,7 @@ pub enum Command {
         #[arg(long)]
         device: Option<String>,
     },
-    /// Serve the capture as HLS without casting, to check it with ffplay or VLC.
+    /// Serve the capture as HLS without casting, to check it with ffplay (VLC stutters on it).
     Serve {
         /// Capture a test pattern instead of the screen.
         #[arg(long)]
