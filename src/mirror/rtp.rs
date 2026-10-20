@@ -1,6 +1,12 @@
-//! Cast Streaming wire format: encrypted RTP frames, Sender Reports, receiver feedback.
+//! rtp.rs
+//! Cast Streaming wire format on the sender side: encrypted RTP frames and Sender Reports.
+//! RTP carries the frames over UDP; RTCP carries the reports both ways (see rtcp.rs).
 //! From openscreen/cast/streaming/impl: rtp_packetizer.cc, frame_crypto.cc,
-//! sender_report_builder.cc, compound_rtcp_parser.cc.
+//! sender_report_builder.cc.
+//!
+//! Author: O. Booklage
+//! Date: October 2026
+//! Licence: MIT
 
 use std::collections::VecDeque;
 use std::io::Read;
@@ -15,10 +21,9 @@ const HEADER: usize = 19;
 /// Frames kept to resend lost packets: the receiver gives up beyond 120 (kMaxUnackedFrames).
 const CACHE_FRAMES: usize = 120;
 const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
-/// Bitrate adaptation, first guesses: down 20 % above 2 % of packets lost, up 10 % after 10 s without loss.
-const LOSS_LIMIT: u8 = 5; // out of 256
-const MIN_BITRATE: u32 = 500;
-const CLEAN_PERIOD: Duration = Duration::from_secs(10);
+/// The receiver repeats its loss report until the packet arrives: do not resend it again so soon.
+/// ponytail: fixed, openscreen waits one measured round trip.
+const RESEND_SPACING: Duration = Duration::from_millis(50);
 
 /// AES-128 key and IV mask of one stream, sent in the OFFER.
 #[derive(Clone, Copy)]
@@ -50,6 +55,14 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A frame kept for resending.
+struct SentFrame {
+    id: u32,
+    packets: Vec<Vec<u8>>,
+    /// When each packet was last resent.
+    resent: Vec<Option<Instant>>,
+}
+
 /// One RTP stream (video or audio): numbering, encryption, and the packets kept for resending.
 pub struct RtpStream {
     ssrc: u32,
@@ -58,16 +71,29 @@ pub struct RtpStream {
     keys: Keys,
     seq: u16,
     next_frame: u32,
-    sent: VecDeque<(u32, Vec<Vec<u8>>)>,
+    sent: VecDeque<SentFrame>,
     packets: u32,
+    /// Payload bytes for the Sender Report: wraps at 4 GiB, as RTCP wants.
+    octets: u32,
     /// Payload bytes sent so far, for the bitrate shown in the menu.
-    pub octets: u32,
+    pub total_octets: u64,
 }
 
 impl RtpStream {
     pub fn new(ssrc: u32, payload_type: u8, clock_rate: u64, keys: Keys) -> Self {
         // ponytail: fixed start values; RFC 3550 wants random ones, the receiver does not care.
-        Self { ssrc, payload_type, clock_rate, keys, seq: 0, next_frame: 0, sent: VecDeque::new(), packets: 0, octets: 0 }
+        Self {
+            ssrc,
+            payload_type,
+            clock_rate,
+            keys,
+            seq: 0,
+            next_frame: 0,
+            sent: VecDeque::new(),
+            packets: 0,
+            octets: 0,
+            total_octets: 0,
+        }
     }
 
     fn rtp_time(&self, running: Duration) -> u32 {
@@ -104,24 +130,27 @@ impl RtpStream {
             self.seq = self.seq.wrapping_add(1);
             self.packets = self.packets.wrapping_add(1);
             self.octets = self.octets.wrapping_add(part.len() as u32);
+            self.total_octets += part.len() as u64;
             packets.push(packet);
         }
         if self.sent.len() == CACHE_FRAMES {
             self.sent.pop_front();
         }
-        self.sent.push_back((id, packets));
-        &self.sent.back().expect("just pushed").1
+        let resent = vec![None; packets.len()];
+        self.sent.push_back(SentFrame { id, packets, resent });
+        &self.sent.back().expect("just pushed").packets
     }
 
     /// Packets the receiver reported lost: `packet`, or all of the frame for 0xffff, plus the
     /// next 8 packets flagged in `bits`. `frame` is the frame id truncated to 8 bits.
-    pub fn lost(&self, frame: u8, packet: u16, bits: u8) -> Vec<&[u8]> {
+    /// Packets resent less than RESEND_SPACING before `now` are left out.
+    pub fn lost(&mut self, frame: u8, packet: u16, bits: u8, now: Instant) -> Vec<&[u8]> {
         let latest = self.next_frame.wrapping_sub(1);
         let mut id = (latest & !0xff) | u32::from(frame);
         if id > latest {
             id = id.wrapping_sub(256);
         }
-        let Some((_, packets)) = self.sent.iter().find(|(sent_id, _)| *sent_id == id) else {
+        let Some(SentFrame { packets, resent, .. }) = self.sent.iter_mut().find(|f| f.id == id) else {
             return Vec::new();
         };
         let wanted: Vec<usize> = if packet == 0xffff {
@@ -131,7 +160,16 @@ impl RtpStream {
             let flagged = (0..8).filter(|bit| bits >> bit & 1 == 1).map(|bit| first + 1 + bit);
             std::iter::once(first).chain(flagged).collect()
         };
-        wanted.into_iter().filter_map(|index| packets.get(index).map(Vec::as_slice)).collect()
+        let mut out = Vec::new();
+        for index in wanted {
+            let (Some(data), Some(last)) = (packets.get(index), resent.get_mut(index)) else { continue };
+            if last.is_some_and(|at| now.duration_since(at) < RESEND_SPACING) {
+                continue;
+            }
+            *last = Some(now);
+            out.push(data.as_slice());
+        }
+        out
     }
 
     /// RTCP Sender Report: maps the RTP clock to the wall clock, so the receiver can schedule frames.
@@ -145,82 +183,6 @@ impl RtpStream {
         report.extend(self.packets.to_be_bytes());
         report.extend(self.octets.to_be_bytes());
         report
-    }
-}
-
-/// What the receiver reports in RTCP.
-#[derive(Debug, PartialEq)]
-pub enum Feedback {
-    KeyFrame { ssrc: u32 },
-    Lost { ssrc: u32, frame: u8, packet: u16, bits: u8 },
-    /// Share of packets lost since the last report, out of 256.
-    Loss { ssrc: u32, fraction: u8 },
-}
-
-fn word(bytes: &[u8], at: usize) -> Option<u32> {
-    let four = bytes.get(at..at + 4)?;
-    Some(u32::from_be_bytes([four[0], four[1], four[2], four[3]]))
-}
-
-/// Parse a compound RTCP packet from the receiver. Unknown parts are skipped.
-pub fn parse_rtcp(buf: &[u8]) -> Vec<Feedback> {
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at + 4 <= buf.len() {
-        let (subtype, kind) = (buf[at] & 0x1f, buf[at + 1]);
-        let words = usize::from(u16::from_be_bytes([buf[at + 2], buf[at + 3]]));
-        let end = (at + 4 + 4 * words).min(buf.len());
-        let body = &buf[at + 4..end];
-        at = end;
-        match (kind, subtype) {
-            // Receiver Report: its blocks follow the reporter's SSRC.
-            (201, count) => {
-                for block in body.get(4..).unwrap_or_default().chunks_exact(24).take(usize::from(count)) {
-                    found.extend(word(block, 0).map(|ssrc| Feedback::Loss { ssrc, fraction: block[4] }));
-                }
-            }
-            (206, 1) => found.extend(word(body, 4).map(|ssrc| Feedback::KeyFrame { ssrc })),
-            (206, 15) if body.get(8..12) == Some(b"CAST") && body.len() >= 16 => {
-                let Some(ssrc) = word(body, 4) else { continue };
-                for loss in body[16..].chunks_exact(4).take(usize::from(body[13])) {
-                    let packet = u16::from_be_bytes([loss[1], loss[2]]);
-                    found.push(Feedback::Lost { ssrc, frame: loss[0], packet, bits: loss[3] });
-                }
-            }
-            _ => {}
-        }
-    }
-    found
-}
-
-/// Video bitrate in kbit/s, following the receiver's loss reports, never above the user's setting.
-pub struct Rate {
-    max: u32,
-    pub current: u32,
-    clean_since: Instant,
-}
-
-impl Rate {
-    pub fn new(max: u32) -> Self {
-        Self { max, current: max, clean_since: Instant::now() }
-    }
-
-    /// New bitrate to set, if it changes.
-    pub fn adapt(&mut self, fraction_lost: u8, now: Instant) -> Option<u32> {
-        let next = if fraction_lost > LOSS_LIMIT {
-            self.clean_since = now;
-            (self.current * 4 / 5).max(MIN_BITRATE).min(self.max)
-        } else if now.duration_since(self.clean_since) >= CLEAN_PERIOD {
-            self.clean_since = now;
-            (self.current * 11 / 10).min(self.max)
-        } else {
-            self.current
-        };
-        if next == self.current {
-            return None;
-        }
-        self.current = next;
-        Some(next)
     }
 }
 
@@ -263,49 +225,12 @@ mod tests {
 
         let delta = stream.packetize(&[1, 2, 3], Duration::from_secs(2), false).to_vec();
         assert_eq!(delta[0][12..19], [0x40, 1, 0, 0, 0, 0, 0]);
-        assert_eq!(stream.lost(0, 1, 0b1), vec![&packets[1][..], &packets[2][..]]);
-        assert_eq!(stream.lost(0, 0xffff, 0).len(), 3);
-        assert!(stream.lost(9, 0, 0).is_empty());
-    }
-
-    #[test]
-    fn parses_receiver_feedback() {
-        let mut buf = vec![0x81, 201, 0, 7];
-        buf.extend(2u32.to_be_bytes());
-        buf.extend(SSRC.to_be_bytes());
-        buf.extend([12, 0, 0, 1]);
-        buf.extend([0; 16]);
-        buf.extend([0x81, 206, 0, 2]);
-        buf.extend(2u32.to_be_bytes());
-        buf.extend(SSRC.to_be_bytes());
-        buf.extend([0x8f, 206, 0, 5]);
-        buf.extend(2u32.to_be_bytes());
-        buf.extend(SSRC.to_be_bytes());
-        buf.extend(b"CAST");
-        buf.extend([4, 1, 0, 100]);
-        buf.extend([5, 0, 3, 0b10]);
-        assert_eq!(
-            parse_rtcp(&buf),
-            vec![
-                Feedback::Loss { ssrc: SSRC, fraction: 12 },
-                Feedback::KeyFrame { ssrc: SSRC },
-                Feedback::Lost { ssrc: SSRC, frame: 5, packet: 3, bits: 0b10 },
-            ]
-        );
-        assert!(parse_rtcp(&[0x80, 201]).is_empty());
-    }
-
-    #[test]
-    fn adapts_bitrate() {
-        let start = Instant::now();
-        let mut rate = Rate { max: 2500, current: 2500, clean_since: start };
-        assert_eq!(rate.adapt(0, start), None);
-        assert_eq!(rate.adapt(20, start), Some(2000));
-        assert_eq!(rate.adapt(0, start + Duration::from_secs(5)), None);
-        assert_eq!(rate.adapt(0, start + CLEAN_PERIOD), Some(2200));
-        assert_eq!(rate.adapt(0, start + CLEAN_PERIOD * 3), Some(2420));
-        assert_eq!(rate.adapt(0, start + CLEAN_PERIOD * 4), Some(2500));
-        let mut low = Rate { max: 300, current: 300, clean_since: start };
-        assert_eq!(low.adapt(20, start), None, "never above the user's setting");
+        let now = Instant::now();
+        assert_eq!(stream.lost(0, 1, 0b1, now), vec![&packets[1][..], &packets[2][..]]);
+        // Packets 1 and 2 were just resent: only packet 0 goes again.
+        assert_eq!(stream.lost(0, 0xffff, 0, now).len(), 1);
+        assert_eq!(stream.lost(0, 0xffff, 0, now + RESEND_SPACING).len(), 3);
+        assert!(stream.lost(9, 0, 0, now).is_empty());
+        assert_eq!(stream.total_octets, 3003);
     }
 }

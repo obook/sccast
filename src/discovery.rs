@@ -53,11 +53,10 @@ pub fn discover(timeout: Duration) -> anyhow::Result<Vec<CastDevice>> {
 /// Returns as soon as it answers, instead of waiting for the full timeout.
 /// When it does not answer, the error lists the devices seen during the same browse.
 pub fn find(query: &str, timeout: Duration) -> anyhow::Result<CastDevice> {
-    let wanted = query.to_lowercase();
     let mut hit = None;
     let mut seen = BTreeMap::new();
     browse(timeout, |device| {
-        if device.name.to_lowercase() == wanted || device.id == query {
+        if is_named(&device, query) {
             hit = Some(device);
             return true;
         }
@@ -72,6 +71,11 @@ pub fn find(query: &str, timeout: Duration) -> anyhow::Result<CastDevice> {
     }
     let names: Vec<_> = seen.into_values().collect();
     anyhow::bail!("device {query:?} not found; available: {}", names.join(", "))
+}
+
+/// True when `query` is the device's id, or its name in any case (accented letters included).
+fn is_named(device: &CastDevice, query: &str) -> bool {
+    device.id == query || device.name.to_lowercase() == query.to_lowercase()
 }
 
 pub const NONE_FOUND: &str = "no Chromecast found (check that mDNS/UDP 5353 is not blocked)";
@@ -98,4 +102,23 @@ pub fn browse(timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) 
     }
     let _ = mdns.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_names_in_any_case() {
+        let device = CastDevice {
+            id: "abc123".into(),
+            name: "TÉLÉ Salle 12".into(),
+            model: "Chromecast".into(),
+            ip: Ipv4Addr::LOCALHOST,
+            port: 8009,
+        };
+        assert!(is_named(&device, "télé salle 12"));
+        assert!(is_named(&device, "abc123"));
+        assert!(!is_named(&device, "Salle 12"));
+    }
 }

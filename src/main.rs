@@ -70,6 +70,9 @@ fn main() -> anyhow::Result<()> {
                     bail!("{} is not a file", file.display());
                 }
             }
+            if stream.format == cli::Format::Mirror && (url.is_some() || file.is_some()) {
+                bail!("--format mirror casts the screen only, not --url or --file");
+            }
             let settings = menu::Settings { stream, audio_delay, latency, receiver };
             // In a terminal without --device, the menu picks the device and runs the casts.
             let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -188,6 +191,9 @@ fn cast_screen(
     out: &Out,
 ) -> anyhow::Result<()> {
     tracing::info!(name = %device.name, ip = %device.ip, "casting");
+    if let Out::Menu(_) = out {
+        watch_round_trip(device, stop, out.clone());
+    }
     if s.stream.format == cli::Format::Mirror {
         return mirror::cast(device, s, screen, stop, out);
     }
@@ -204,9 +210,6 @@ fn cast_screen(
         out.send(menu::Status::Served(Box::new(served)));
     }
     out.send(menu::Status::Dropped(Arc::clone(&hls.dropped)));
-    if let Out::Menu(_) = out {
-        watch_round_trip(device, stop, out.clone());
-    }
     let played = (|| {
         // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
         let receiver = launch(device, &s.receiver, reuse, stop, out)?;
