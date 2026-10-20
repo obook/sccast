@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::Context;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
 use rust_cast::channels::media::{IdleReason, Media, MediaResponse, PlayerState, StreamType};
-use rust_cast::channels::receiver::{CastDeviceApp, ReceiverResponse};
+use rust_cast::channels::receiver::{Application, CastDeviceApp, ReceiverResponse};
 use rust_cast::{CastDevice, ChannelMessage};
 
 use crate::discovery::CastDevice as Device;
@@ -37,16 +37,15 @@ pub fn stop(device: &Device, session: Option<&str>) -> anyhow::Result<bool> {
     Ok(true)
 }
 
-/// Launch the Default Media Receiver on `device`, play `url`, and block until
-/// playback ends, the app is closed elsewhere, or `stop` is set.
-/// `live` tells the receiver not to buffer ahead (HLS capture).
-pub fn play_url(
-    device: &Device,
-    url: &str,
-    content_type: &str,
-    live: bool,
-    stop: &'static AtomicBool,
-) -> anyhow::Result<()> {
+/// Default Media Receiver running on a device, ready to play.
+pub struct Receiver {
+    cast: CastDevice<'static>,
+    app: Application,
+    device: Device,
+}
+
+/// Launch the Default Media Receiver on `device`. The TV shows the Cast screen.
+pub fn launch(device: &Device) -> anyhow::Result<Receiver> {
     let cast = connect(device)?;
     cast.heartbeat.ping()?;
 
@@ -61,7 +60,34 @@ pub fn play_url(
     let app = cast.receiver.launch_app(&CastDeviceApp::DefaultMediaReceiver)?;
     tracing::info!(session = %app.session_id, "receiver launched");
     cast.connection.connect(app.transport_id.clone())?;
+    Ok(Receiver { cast, app, device: device.clone() })
+}
 
+impl Receiver {
+    /// Close the receiver app, freeing the TV.
+    pub fn close(&self) {
+        if let Err(e) = self.cast.receiver.stop_app(self.app.session_id.clone()) {
+            tracing::warn!("cannot close the receiver app: {e}");
+        }
+    }
+
+    /// Play `url` and block until playback ends, the app is closed elsewhere, or `stop` is set.
+    /// `live` tells the receiver not to buffer ahead (HLS capture).
+    pub fn play(self, url: &str, content_type: &str, live: bool, stop: &'static AtomicBool) -> anyhow::Result<()> {
+        let Receiver { cast, app, device } = self;
+        play(&cast, &app, &device, url, content_type, live, stop)
+    }
+}
+
+fn play(
+    cast: &CastDevice<'static>,
+    app: &Application,
+    device: &Device,
+    url: &str,
+    content_type: &str,
+    live: bool,
+    stop: &'static AtomicBool,
+) -> anyhow::Result<()> {
     // receive() below blocks until the next message (up to ~5 s): close the app
     // from a second connection so Ctrl+C frees the TV at once.
     let watcher = {
@@ -103,6 +129,7 @@ pub fn play_url(
             tracing::warn!("cannot close the receiver app: {e}");
         }
     };
+    eprintln!("Casting to {}. Press Ctrl+C to stop.", device.name);
     let mut app_seen = false;
     loop {
         if watcher.is_finished() {

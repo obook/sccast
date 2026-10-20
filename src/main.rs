@@ -46,29 +46,34 @@ fn main() -> anyhow::Result<()> {
             let ip = server::lan_ip(device.ip.into())?;
             let port = stream.port;
 
+            let launching = format!("Starting the receiver on {}...", device.name);
             if let Some(url) = url {
-                return cast::play_url(&device, &url, "video/mp4", false, stop);
+                return spin(&launching, || cast::launch(&device))?.play(&url, "video/mp4", false, stop);
             }
             if let Some(file) = file {
                 server::serve_file(&file, port)?;
-                return cast::play_url(&device, &format!("http://{ip}:{port}/media"), "video/mp4", false, stop);
+                let receiver = spin(&launching, || cast::launch(&device))?;
+                return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop);
             }
 
             let screen = portal::ScreenCast::open()?;
             let hls = capture::Hls::start(Some(screen), &stream, Duration::from_millis(audio_delay))?;
             server::serve_hls(hls.dir(), port)?;
-            spin("Preparing the stream...", || -> anyhow::Result<()> {
+            // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
+            let receiver = spin(&launching, || cast::launch(&device))?;
+            let prepared = spin("Preparing the stream...", || -> anyhow::Result<()> {
                 while hls.segments()? < capture::MIN_SEGMENTS && !stop.load(Ordering::SeqCst) {
                     hls.poll(Duration::from_millis(100))?;
                 }
                 Ok(())
-            })?;
-            if stop.load(Ordering::SeqCst) {
-                return Ok(());
+            });
+            if prepared.is_err() || stop.load(Ordering::SeqCst) {
+                receiver.close();
+                return prepared;
             }
             let capture = hls.watch(stop)?;
             let url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
-            let played = cast::play_url(&device, &url, "application/x-mpegURL", true, stop);
+            let played = receiver.play(&url, "application/x-mpegURL", true, stop);
             stop.store(true, Ordering::SeqCst);
             // A capture failure explains why the cast stopped: report it first.
             capture.join().expect("capture watcher panicked")?;
