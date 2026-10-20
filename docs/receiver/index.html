@@ -22,11 +22,15 @@ const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
 // Debug builds of sccast add ?debug to the stream URL: show the delay on the TV.
 let debug = false;
+// Continuous Matroska stream (sccast --format mkv): the native player buffers as it likes.
+let mkv = false;
+let latency = DEFAULT_LATENCY;
 
 player.setMediaPlaybackInfoHandler((request, config) => {
   const url = new URL(request.media.contentId);
   debug = url.searchParams.has('debug');
-  const latency = Number(url.searchParams.get('latency')) || DEFAULT_LATENCY;
+  mkv = url.pathname.endsWith('.mkv');
+  latency = Number(url.searchParams.get('latency')) || DEFAULT_LATENCY;
   config.shakaConfig = {
     manifest: { defaultPresentationDelay: latency },
     streaming: {
@@ -43,8 +47,29 @@ const options = new cast.framework.CastReceiverOptions();
 options.useShakaForHls = true;
 options.shakaVersion = '4.15.56';
 
+// No documented getter for the player's <video>: try the known places.
+function video() {
+  const cmp = document.querySelector('cast-media-player');
+  return cmp?.getMediaElement?.() || cmp?.shadowRoot?.querySelector('video') || document.querySelector('video');
+}
+
 const lag = document.getElementById('lag');
 setInterval(() => {
+  if (mkv) {
+    // Jump close to the end of the buffer when the player falls behind it.
+    const v = video();
+    if (!v) {
+      lag.textContent = debug ? 'no video element' : '';
+      return;
+    }
+    const end = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
+    const behind = end - v.currentTime;
+    if (behind > latency + 1) {
+      v.currentTime = end - latency;
+    }
+    lag.textContent = debug ? `${behind.toFixed(1)} s of buffer` : '';
+    return;
+  }
   const range = debug && player.getLiveSeekableRange();
   lag.textContent = range && range.end ? `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live` : '';
 }, 1000);
