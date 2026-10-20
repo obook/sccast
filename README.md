@@ -4,6 +4,9 @@
 device with Chromecast built-in, as HLS served over HTTP on your local
 network and played by Google's Default Media Receiver.
 
+It does not use Google's screen mirroring, the one Chrome and Brave use.
+Expect about 5 seconds of delay on the TV.
+
 ## Requirements
 
 - A Wayland session with `xdg-desktop-portal` (tested on KDE Plasma).
@@ -103,12 +106,16 @@ Turn them down with their hardware knob; muting the PC in the desktop also
 mutes the stream. If the TV sound leads its image, add `--audio-delay 200`
 and adjust.
 
+The TV drops back to its home screen: `sccast` launches the receiver again,
+up to 3 times in 5 minutes. If the device no longer shows in `sccast list`,
+unplug it and plug it back in.
+
 Logs: `RUST_LOG=sccast=debug sccast cast`.
 
 ## Limitations
 
-- About 5 seconds of latency: the TV buffers a few HLS segments. Real-time
-  mirroring would need Chrome's Cast Streaming protocol.
+- About 5 seconds of latency: the TV buffers a few HLS segments before it
+  plays them.
 - The Default Media Receiver draws a "LIVE" badge.
 
 ## Author
