@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Cast { device, url, file, audio_delay, receiver: app_id, stream } => {
+        Command::Cast { device, url, file, audio_delay, receiver: app_id, latency, stream } => {
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
@@ -72,7 +72,11 @@ fn main() -> anyhow::Result<()> {
                 return prepared;
             }
             let capture = hls.watch(stop)?;
-            let url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
+            let mut url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
+            // Read by the custom receiver page; the server ignores the query.
+            if let Some(latency) = latency {
+                url.push_str(&format!("?latency={latency}"));
+            }
             let played = receiver.play(&url, "application/x-mpegURL", true, stop);
             stop.store(true, Ordering::SeqCst);
             // A capture failure explains why the cast stopped: report it first.

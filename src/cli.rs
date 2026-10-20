@@ -35,6 +35,9 @@ pub enum Command {
         /// Receiver app id: Google's Default Media Receiver, or a custom one from the Cast console.
         #[arg(long, default_value = crate::cast::DEFAULT_MEDIA_RECEIVER)]
         receiver: String,
+        /// Seconds the custom receiver stays behind live (default set by the receiver page).
+        #[arg(long)]
+        latency: Option<f64>,
         #[command(flatten)]
         stream: Stream,
     },
