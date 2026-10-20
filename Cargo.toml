@@ -2,6 +2,9 @@
 name = "sccast"
 version = "0.2.0"
 edition = "2021"
+# Set by gstreamer 0.25. Resolver 3 picks dependency versions that build with it.
+rust-version = "1.92"
+resolver = "3"
 license = "MIT"
 authors = ["Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"]
 description = "Cast your Linux desktop to a Chromecast"

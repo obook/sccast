@@ -13,7 +13,7 @@ Google's receiver.
 - A Wayland session with `xdg-desktop-portal` (tested on KDE Plasma).
 - PipeWire, with `pipewire-pulse` for sound.
 - GStreamer (tested with 1.24).
-- A Rust toolchain (`cargo`), only to build from source.
+- A Rust toolchain (`cargo`) 1.92 or newer, only to build from source.
 - Linux PC and TV with Chromecast built-in or Google Chromecast device on the same local network, mDNS (UDP 5353) allowed between
   them.
 
