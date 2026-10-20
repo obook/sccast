@@ -19,13 +19,36 @@ use cli::{Cli, Command};
 use tracing_subscriber::EnvFilter;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
+/// Never set: outside the menu, stopping always closes the receiver app.
+static NO_KEEP: AtomicBool = AtomicBool::new(false);
+/// Set while the menu runs: logs go to log_path().
+static MENU_LOG: AtomicBool = AtomicBool::new(false);
+
+/// Menu log, on the per-user tmpfs (private, cleared at logout).
+fn log_path() -> std::path::PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into).join("sccast.log")
+}
 /// A normal launch takes 2 to 6 s, the fallback to Google's receiver included.
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(20);
 const SEARCHING: &str = "Searching for Chromecast devices, please wait...";
 
 fn main() -> anyhow::Result<()> {
+    // RUST_LOG prints to stderr. The menu owns the terminal: it logs to a file instead, always,
+    // so a problem seen in the menu can be read afterwards.
+    let verbose = std::env::var_os("RUST_LOG").is_some();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("sccast=info")))
+        .with_ansi(false)
+        .with_writer(move || -> Box<dyn Write> {
+            if MENU_LOG.load(Ordering::Relaxed) {
+                let file = std::fs::OpenOptions::new().create(true).append(true).open(log_path());
+                file.map_or_else(|_| Box::new(std::io::sink()) as Box<dyn Write>, |f| Box::new(f))
+            } else if verbose {
+                Box::new(std::io::stderr())
+            } else {
+                Box::new(std::io::sink())
+            }
+        })
         .init();
 
     // `sccast` alone opens the cast menu.
@@ -61,16 +84,17 @@ fn main() -> anyhow::Result<()> {
             let port = settings.stream.port;
 
             if let Some(url) = url {
-                return launch(&device, &settings.receiver, &out)?.play(&url, "video/mp4", false, stop, &say);
+                return launch(&device, &settings.receiver, false, &out)?
+                    .play(&url, "video/mp4", false, stop, &NO_KEEP, &say);
             }
             if let Some(file) = file {
                 let ip = server::lan_ip(device.ip.into())?;
                 let _server = server::serve_file(&file, port, stop)?;
-                let receiver = launch(&device, &settings.receiver, &out)?;
-                return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop, &say);
+                let receiver = launch(&device, &settings.receiver, false, &out)?;
+                return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop, &NO_KEEP, &say);
             }
             let screen = portal::ScreenCast::open()?;
-            cast_screen(&device, &settings, &screen, stop, &out)
+            cast_screen(&device, &settings, &screen, stop, None, &out)
         }
         Command::Stop { device, receiver: app_id } => {
             let device = pick_device(device.as_deref())?;
@@ -150,13 +174,17 @@ impl Out {
 
 /// Capture `screen`, serve it and play it on `device` until `stop` or the end of the cast.
 /// Frees the HTTP port before returning, so the next cast can bind it.
+/// With `keep` (menu), reuse a receiver left open and leave it open when `keep` is set at the stop.
 fn cast_screen(
     device: &discovery::CastDevice,
     s: &menu::Settings,
     screen: &portal::ScreenCast,
     stop: &'static AtomicBool,
+    keep: Option<&'static AtomicBool>,
     out: &Out,
 ) -> anyhow::Result<()> {
+    let reuse = keep.is_some();
+    let keep = keep.unwrap_or(&NO_KEEP);
     tracing::info!(name = %device.name, ip = %device.ip, "casting");
     let stream = &s.stream;
     let ip = server::lan_ip(device.ip.into())?;
@@ -172,7 +200,7 @@ fn cast_screen(
         // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
         let launched: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
         watch_launch(launched, stop, hls.halter(), out.clone(), device.name.clone());
-        let receiver = launch(device, &s.receiver, out);
+        let receiver = launch(device, &s.receiver, reuse, out);
         launched.store(true, Ordering::SeqCst);
         let receiver = receiver?;
         let prepared = out.step("Preparing the stream...", || -> anyhow::Result<()> {
@@ -185,7 +213,9 @@ fn cast_screen(
             Ok(())
         });
         if prepared.is_err() || stop.load(Ordering::SeqCst) {
-            receiver.close();
+            if !keep.load(Ordering::SeqCst) {
+                receiver.close();
+            }
             return prepared;
         }
         let capture = hls.watch(stop)?;
@@ -201,7 +231,7 @@ fn cast_screen(
         if !query.is_empty() {
             url = format!("{url}?{}", query.join("&"));
         }
-        let played = receiver.play(&url, content_type, true, stop, &|r| out.report(r));
+        let played = receiver.play(&url, content_type, true, stop, keep, &|r| out.report(r));
         stop.store(true, Ordering::SeqCst);
         // A capture failure explains why the cast stopped: report it first.
         capture.join().expect("capture watcher panicked")?;
@@ -254,6 +284,9 @@ fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     let quit = stop_flag()?;
     // The screen first, before the menu takes the terminal.
     let screen = portal::ScreenCast::open()?;
+    // A fresh log for each run.
+    let _ = std::fs::remove_file(log_path());
+    MENU_LOG.store(true, Ordering::Relaxed);
     let mut terminal = ratatui::init();
     let result = drive_menu(&mut terminal, &mut settings, screen, quit);
     ratatui::restore();
@@ -269,7 +302,10 @@ fn drive_menu(
     let mut menu = menu::Menu::new();
     // Chosen before the menu, kept for every cast; p replaces it.
     let screen = Arc::new(Mutex::new(Arc::new(screen)));
-    let mut running: Option<(&'static AtomicBool, JoinHandle<()>)> = None;
+    // Stop and keep flags of the running cast, and its thread.
+    let mut running: Option<(&'static AtomicBool, &'static AtomicBool, JoinHandle<()>)> = None;
+    // TV where the receiver may be open, and its app id.
+    let mut tv: Option<(discovery::CastDevice, String)> = None;
     loop {
         let action = menu.next(terminal, s, quit)?;
         if let menu::Action::PickScreen = action {
@@ -289,29 +325,42 @@ fn drive_menu(
             });
             continue;
         }
-        if let Some((stop, cast)) = running.take() {
+        // The receiver stays open on the TV between casts to the same TV, and after s:
+        // the Sharp TV sometimes never answered a launch right after a close.
+        let same_tv = matches!((&action, &tv), (menu::Action::Cast(d), Some((open, _))) if d.id == open.id);
+        let keep_open = same_tv || matches!(action, menu::Action::Stop);
+        if let Some((stop, keep, cast)) = running.take() {
             menu.set_status(menu::Status::Info("Stopping...".into()));
             menu.draw_now(terminal, s)?;
+            keep.store(keep_open, Ordering::SeqCst);
             stop.store(true, Ordering::SeqCst);
-            // The TV can stop answering: stop waiting after 5 s.
-            let started = Instant::now();
-            while !cast.is_finished() && started.elapsed() < Duration::from_secs(5) {
-                std::thread::sleep(Duration::from_millis(50));
-            }
+            wait_for(&cast);
             menu.set_status(menu::Status::Ended);
+        } else if !keep_open {
+            // A receiver left open by s, on this TV or another one.
+            if let Some((device, app_id)) = tv.take() {
+                menu.set_status(menu::Status::Info(format!("Closing the receiver on {}...", device.name)));
+                menu.draw_now(terminal, s)?;
+                wait_for(&std::thread::spawn(move || drop(cast::stop(&device, &app_id, None))));
+            }
+        }
+        if !keep_open {
+            tv = None;
         }
         let device = match action {
             menu::Action::Quit => return Ok(()),
             menu::Action::Stop | menu::Action::PickScreen => continue,
             menu::Action::Cast(device) => device,
         };
-        // ponytail: one leaked flag per cast (a few bytes), play() wants a 'static flag.
+        // ponytail: two leaked flags per cast (a few bytes), play() wants 'static flags.
         let stop: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        let keep: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
         let out = Out::Menu(menu.status_sender());
         let settings = s.clone();
         let screen = Arc::clone(&screen.lock().unwrap());
         menu.set_casting(Some(device.id.clone()));
-        let cast = std::thread::spawn(move || match cast_screen(&device, &settings, &screen, stop, &out) {
+        tv = Some((device.clone(), settings.receiver.clone()));
+        let cast = std::thread::spawn(move || match cast_screen(&device, &settings, &screen, stop, Some(keep), &out) {
             Ok(()) => out.send(menu::Status::Ended),
             // The sharing may have been stopped from the desktop.
             Err(e) if format!("{e:#}").contains("capture") => {
@@ -319,7 +368,15 @@ fn drive_menu(
             }
             Err(e) => out.send(menu::Status::Error(format!("{e:#}"))),
         });
-        running = Some((stop, cast));
+        running = Some((stop, keep, cast));
+    }
+}
+
+/// Wait for `thread`, at most 5 s: the TV can stop answering.
+fn wait_for<T>(thread: &JoinHandle<T>) {
+    let started = Instant::now();
+    while !thread.is_finished() && started.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -366,8 +423,9 @@ fn spin<T>(message: &str, f: impl FnOnce() -> T) -> T {
 
 /// Resolve `--device`, or let the user pick one from the devices found.
 /// Start the receiver on `device`, telling the user when sccast's own fell back to Google's.
-fn launch(device: &discovery::CastDevice, app_id: &str, out: &Out) -> anyhow::Result<cast::Receiver> {
-    let receiver = out.step(&format!("Starting the receiver on {}...", device.name), || cast::launch(device, app_id))?;
+fn launch(device: &discovery::CastDevice, app_id: &str, reuse: bool, out: &Out) -> anyhow::Result<cast::Receiver> {
+    let receiver =
+        out.step(&format!("Starting the receiver on {}...", device.name), || cast::launch(device, app_id, reuse))?;
     if receiver.app_id() != app_id {
         out.say(&format!(
             "The sccast receiver did not start on {}: using Google's receiver (about 5 s of delay).",

@@ -168,9 +168,16 @@ pub struct Menu {
 
 impl Menu {
     pub fn new() -> Self {
+        let mut menu = Self::idle();
+        menu.scan();
+        menu
+    }
+
+    /// A menu that does not search the network yet.
+    fn idle() -> Self {
         let (tx, rx) = mpsc::channel();
         let (status_tx, status_rx) = mpsc::channel();
-        let mut menu = Self {
+        Self {
             devices: BTreeMap::new(),
             device: ListState::default().with_selected(Some(0)),
             row: ListState::default().with_selected(Some(0)),
@@ -184,9 +191,7 @@ impl Menu {
             status_tx,
             status_rx,
             live: Live::default(),
-        };
-        menu.scan();
-        menu
+        }
     }
 
     /// Channel for a new cast thread to report its progress. Replaces the previous one, so a
@@ -556,26 +561,80 @@ mod tests {
         assert_eq!(value(&s, 0), "Entry-level TV");
         assert_eq!(s.stream.bitrate, 2500);
 
-        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 25)).unwrap();
-        let mut menu = Menu::new();
-        menu.devices.insert("x".into(), CastDevice {
-            id: "x".into(),
-            name: "Living Room TV".into(),
-            model: "Chromecast".into(),
-            ip: std::net::Ipv4Addr::LOCALHOST,
-            port: 8009,
-        });
-        menu.set_casting(Some("x".into()));
+        // Made-up devices: no network search, so no real device shows up.
+        let mut menu = Menu::idle();
+        let fake = [("tv", "Living Room TV", "Chromecast"), ("hub", "Kitchen", "Google Nest Hub"), ("pj", "Classroom", "Chromecast with Google TV")];
+        for (id, name, model) in fake {
+            let device = CastDevice {
+                id: id.into(),
+                name: name.into(),
+                model: model.into(),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+                port: 8009,
+            };
+            menu.devices.insert(id.into(), device);
+        }
+        menu.device.select(Some(1));
+        menu.set_casting(Some("tv".into()));
         menu.set_status(Status::Player("Playing".into()));
         menu.set_status(Status::Info("Casting to Living Room TV. Ctrl+C stops.".into()));
-        menu.live.bitrate = vec![2400, 2600, 2500, 3100, 2200, 2500, 2450, 2700, 2500, 2550];
+        menu.live.started = Instant::now().checked_sub(Duration::from_secs(754));
+        menu.live.buffering = vec![Instant::now().checked_sub(Duration::from_secs(400)).unwrap()];
+        menu.live.cpu = 62.0;
+        menu.live.bitrate = (0..60).map(|i| 2500 + (i * 37 % 11) * 40 - 200).collect();
+
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 25)).unwrap();
         terminal.draw(|f| menu.draw(f, &s)).unwrap();
-        let screen: Vec<&str> = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        let buffer = terminal.backend().buffer();
+        let screen: Vec<&str> = buffer.content().iter().map(|c| c.symbol()).collect();
         for line in screen.chunks(80) {
             println!("{}", line.concat());
         }
-        let screen = screen.concat();
-        assert!(screen.contains("Living Room TV") && screen.contains("Entry-level TV") && screen.contains("HLS"));
-        assert!(screen.contains("00:00:00") && screen.contains("Bitrate 2550 kbit/s"));
+        let text = screen.concat();
+        assert!(text.contains("Living Room TV") && text.contains("Entry-level TV") && text.contains("HLS"));
+        assert!(text.contains("00:12:34") && text.contains("Bitrate"));
+
+        // SCCAST_SCREENSHOT=file.html cargo test draws: the same screen as a colored page, for media/.
+        if let Ok(path) = std::env::var("SCCAST_SCREENSHOT") {
+            std::fs::write(path, html(buffer)).unwrap();
+        }
+    }
+
+    fn html(buffer: &ratatui::buffer::Buffer) -> String {
+        let css = |c: Color, default: &str| match c {
+            Color::Reset => default.to_string(),
+            Color::Black => "#1e1e2e".into(),
+            Color::Gray => "#a6adc8".into(),
+            Color::DarkGray => "#585b70".into(),
+            Color::Green => "#a6e3a1".into(),
+            Color::Yellow => "#f9e2af".into(),
+            Color::Red => "#f38ba8".into(),
+            Color::Cyan => "#89dceb".into(),
+            Color::White => "#ffffff".into(),
+            Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+            _ => default.to_string(),
+        };
+        let mut out = String::from(
+            "<!doctype html><meta charset=utf-8><body style=\"margin:0;background:#1e1e2e\">\
+             <pre style=\"margin:16px;font:16px/1.25 'DejaVu Sans Mono',monospace;color:#cdd6f4\">",
+        );
+        for (i, cell) in buffer.content().iter().enumerate() {
+            if i > 0 && i % buffer.area.width as usize == 0 {
+                out.push('\n');
+            }
+            let weight = if cell.modifier.contains(Modifier::BOLD) { "bold" } else { "normal" };
+            let symbol = match cell.symbol() {
+                "<" => "&lt;",
+                ">" => "&gt;",
+                "&" => "&amp;",
+                s => s,
+            };
+            out.push_str(&format!(
+                "<span style=\"color:{};background:{};font-weight:{weight}\">{symbol}</span>",
+                css(cell.fg, "#cdd6f4"),
+                css(cell.bg, "transparent"),
+            ));
+        }
+        out + "</pre>"
     }
 }

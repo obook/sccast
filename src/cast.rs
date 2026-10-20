@@ -58,14 +58,24 @@ pub struct Receiver {
 /// Launch the receiver app `app_id` on `device`. If a custom receiver does not start
 /// (unknown to the device, page not loading), fall back to the Default Media Receiver.
 /// The TV shows the Cast screen.
-pub fn launch(device: &Device, app_id: &str) -> anyhow::Result<Receiver> {
+/// With `reuse`, attach to that receiver if it already runs (left open by the menu between
+/// two casts): the Sharp TV sometimes never answered a launch right after a close.
+pub fn launch(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Receiver> {
     let cast = connect(device)?;
     cast.heartbeat.ping()?;
 
+    let status = cast.receiver.get_status()?;
+    let ours = |a: &&Application| a.app_id == app_id || a.app_id == DEFAULT_MEDIA_RECEIVER;
+    if reuse {
+        if let Some(app) = status.applications.iter().find(ours) {
+            tracing::info!(session = %app.session_id, app_id = %app.app_id, "reusing the receiver");
+            cast.connection.connect(app.transport_id.clone())?;
+            return Ok(Receiver { cast, app: app.clone(), device: device.clone() });
+        }
+    }
     // A receiver left running in the background (closed with the TV remote) is reused by
     // LAUNCH without coming back on screen: close it so the TV switches to the new one.
-    let status = cast.receiver.get_status()?;
-    for old in status.applications.iter().filter(|a| a.app_id == app_id || a.app_id == DEFAULT_MEDIA_RECEIVER) {
+    for old in status.applications.iter().filter(ours) {
         tracing::info!(session = %old.session_id, "closing previous receiver");
         cast.receiver.stop_app(old.session_id.clone())?;
     }
@@ -102,12 +112,14 @@ impl Receiver {
     /// If the device drops the session, launch the receiver again and resume.
     /// `live` tells the receiver not to buffer ahead (HLS capture).
     /// `report` shows progress to the user (terminal or menu).
+    /// If `keep` is set when `stop` comes, the receiver app stays open for the next cast.
     pub fn play(
         self,
         url: &str,
         content_type: &str,
         live: bool,
         stop: &'static AtomicBool,
+        keep: &'static AtomicBool,
         report: &dyn Fn(Report),
     ) -> anyhow::Result<()> {
         let mut receiver = self;
@@ -124,6 +136,9 @@ impl Receiver {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 tracing::info!("stopping");
+                if keep.load(Ordering::SeqCst) {
+                    return;
+                }
                 let session = session.lock().unwrap().clone();
                 if let Err(e) = self::stop(&device, &app_id, Some(&session)) {
                     tracing::warn!("cannot close the receiver app: {e:#}");
@@ -167,7 +182,8 @@ impl Receiver {
                 report(Report::Reconnecting);
                 report(Report::Say(&format!("Lost {} ({why}). Reconnecting ({drops}/{MAX_RECONNECTS})...", device.name)));
                 std::thread::sleep(RECONNECT_DELAY);
-                match launch(&device, &app_id) {
+                // A fresh launch: the session was lost, an attached app may be in the background.
+                match launch(&device, &app_id, false) {
                     Ok(new) => {
                         receiver = new;
                         *session.lock().unwrap() = receiver.app.session_id.clone();
@@ -177,7 +193,9 @@ impl Receiver {
                 }
             }
             if stop.load(Ordering::SeqCst) {
-                receiver.close();
+                if !keep.load(Ordering::SeqCst) {
+                    receiver.close();
+                }
                 return Ok(());
             }
         }
@@ -210,7 +228,20 @@ fn play_session(
 ) -> anyhow::Result<Outcome> {
     let url = &media.content_id;
     let load = || -> anyhow::Result<i32> {
-        let loaded = cast.media.load(app.transport_id.clone(), app.session_id.clone(), media)?;
+        let mut tries = 0;
+        let loaded = loop {
+            match cast.media.load(app.transport_id.clone(), app.session_id.clone(), media) {
+                Ok(loaded) => break loaded,
+                // A reused receiver may still report errors of the stream it played (e.g. 310,
+                // unknown to rust_cast), which fail this LOAD: send it again.
+                Err(e @ rust_cast::errors::Error::Parsing(_)) if tries < 3 => {
+                    tries += 1;
+                    tracing::warn!("unreadable answer to LOAD ({e}), sending it again");
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
         let media_session = loaded
             .entries
             .first()
@@ -275,6 +306,8 @@ fn play_session(
                     }
                 }
             }
+            // A LOAD replaced by the next one (sent again after an unreadable answer): nothing to do.
+            ChannelMessage::Media(MediaResponse::LoadCancelled(_)) => {}
             ChannelMessage::Media(other) => {
                 // The Sharp refused once right after sccast was restarted, and accepted the next try.
                 if matches!(other, MediaResponse::LoadFailed(_)) && reloads < MAX_RELOADS {

@@ -79,7 +79,8 @@ then open a menu: the devices appear as they answer, and the command line
 options prefill the settings. Arrows move and change, Tab switches columns,
 Enter casts, or casts again with the new settings. The menu stays during the
 cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
-chooses another screen, `q` or Ctrl+C quits and frees the TV.
+chooses another screen, `q` or Ctrl+C quits and frees the TV. Between two
+casts to the same TV, the receiver stays open on it.
 
 `cast` opens the screen picker, waits about 6 seconds for the stream to
 fill, then starts the TV. Ctrl+C stops the TV at once.
@@ -142,7 +143,8 @@ The TV drops back to its home screen: `sccast` launches the receiver again,
 up to 3 times in 5 minutes. If the device no longer shows in `sccast list`,
 unplug it and plug it back in.
 
-Logs: `RUST_LOG=sccast=debug sccast cast`.
+Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
+`$XDG_RUNTIME_DIR/sccast.log`, emptied at each start.
 
 ## Limitations
 
