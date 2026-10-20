@@ -149,6 +149,9 @@ Mute the PC in the desktop: on PipeWire, the stream keeps its sound (checked
 on KDE neon). If the TV sound leads its image, add `--audio-delay 200` and
 adjust.
 
+Image but no sound, with a Chromecast on HDMI: set the TV audio output to
+PCM (needed on a Sharp TV, with every app).
+
 Stutter, or sound ahead of a frozen image, on moving content: the TV may not
 decode 1080p in real time. Try `--resolution 1280x720 --bitrate 2500`.
 
