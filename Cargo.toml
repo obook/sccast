@@ -21,3 +21,16 @@ tokio = { version = "1.54.0", features = ["rt", "net", "time"] }
 tower-http = { version = "0.7.1", features = ["fs", "cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# cargo-deb, used by packaging/build-deb.sh. $auto adds the shared libraries (libgstreamer, libc);
+# the GStreamer plugins are loaded at run time, so they are listed by hand.
+[package.metadata.deb]
+maintainer = "Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"
+section = "video"
+depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-pipewire, xdg-desktop-portal"
+recommends = "pipewire-pulse"
+extended-description = "sccast casts the screen and sound of a Wayland desktop to a Chromecast or a device with Chromecast built-in, as a live HLS stream."
+assets = [
+    ["target/release/sccast", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/sccast/", "644"],
+]
