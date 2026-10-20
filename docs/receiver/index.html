@@ -20,9 +20,12 @@ const DEFAULT_LATENCY = 1;
 
 const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
+// Debug builds of sccast add ?debug to the stream URL: show the delay on the TV.
+let debug = false;
 
 player.setMediaPlaybackInfoHandler((request, config) => {
   const url = new URL(request.media.contentId);
+  debug = url.searchParams.has('debug');
   const latency = Number(url.searchParams.get('latency')) || DEFAULT_LATENCY;
   config.shakaConfig = {
     manifest: { defaultPresentationDelay: latency },
@@ -40,10 +43,9 @@ const options = new cast.framework.CastReceiverOptions();
 options.useShakaForHls = true;
 options.shakaVersion = '4.15.56';
 
-// Shown on the TV while tuning the latency.
 const lag = document.getElementById('lag');
 setInterval(() => {
-  const range = player.getLiveSeekableRange();
+  const range = debug && player.getLiveSeekableRange();
   lag.textContent = range && range.end ? `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live` : '';
 }, 1000);
 
