@@ -7,25 +7,39 @@
 <style>
   body { margin: 0; background: #000; }
   #lag { position: absolute; right: 2vw; bottom: 2vh; z-index: 10; color: #fff8; font: 2.5vh sans-serif; }
+  #warn { display: none; position: absolute; right: 2vw; top: 2vh; z-index: 10; padding: 1vh 1.5vw;
+          border-radius: 1vh; background: #000a; color: #fc6; font: bold 3vh sans-serif; }
 </style>
 </head>
 <body>
 <cast-media-player></cast-media-player>
 <div id="lag"></div>
+<div id="warn"></div>
 <script>
+// No optional chaining (?.): it gave a black screen on the Sharp TV (old engine, suspected). No ?? either.
+
 // Seconds behind the newest segment. Shaka's HLS default is 3 segments (3 s for sccast).
 // sccast --latency overrides it with ?latency= on the stream URL.
 // 1 s plays smoothly on the Sharp TV (about 2 to 3 s of real delay).
 const DEFAULT_LATENCY = 1;
+// The network is too slow when the download speed is below the stream bitrate times this.
+const BANDWIDTH_MARGIN = 1.3;
+// Buffering more often than this per minute makes the stream stutter.
+const MAX_BUFFERING_PER_MINUTE = 2;
+// Sound bitrate set by sccast, added to the video bitrate.
+const AUDIO_BPS = 128000;
 
 const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
-// Debug builds of sccast add ?debug to the stream URL: show the delay on the TV.
+// Debug builds of sccast add ?debug to the stream URL: show the measures on the TV.
 let debug = false;
+// Video bitrate in bit/s, from ?kbps= on the stream URL (0 if absent).
+let videoBps = 0;
 
 player.setMediaPlaybackInfoHandler((request, config) => {
   const url = new URL(request.media.contentId);
   debug = url.searchParams.has('debug');
+  videoBps = (Number(url.searchParams.get('kbps')) || 0) * 1000;
   const latency = Number(url.searchParams.get('latency')) || DEFAULT_LATENCY;
   config.shakaConfig = {
     manifest: { defaultPresentationDelay: latency },
@@ -39,14 +53,59 @@ player.setMediaPlaybackInfoHandler((request, config) => {
   return config;
 });
 
+// Start time of each buffering period.
+const buffering = [];
+// Guarded: an error here would stop the page before context.start (black screen).
+try {
+  player.addEventListener(cast.framework.events.EventType.BUFFERING, (event) => {
+    if (event.isBuffering) {
+      buffering.push(Date.now());
+    }
+  });
+} catch (e) {
+  console.warn('no buffering events', e);
+}
+
 const options = new cast.framework.CastReceiverOptions();
 options.useShakaForHls = true;
 options.shakaVersion = '4.15.56';
 
+const french = (navigator.language || '').indexOf('fr') === 0;
+const TEXT = french
+  ? { network: 'Réseau saturé : baissez le débit', stutter: 'Lecture saccadée : baissez le débit' }
+  : { network: 'Network congested: lower the bitrate', stutter: 'Playback stutters: lower the bitrate' };
+
 const lag = document.getElementById('lag');
+const warn = document.getElementById('warn');
 setInterval(() => {
-  const range = debug && player.getLiveSeekableRange();
-  lag.textContent = range && range.end ? `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live` : '';
+  const now = Date.now();
+  while (buffering.length && now - buffering[0] > 60000) {
+    buffering.shift();
+  }
+  let stats = {};
+  try {
+    stats = player.getStats() || {};
+  } catch (e) {
+    // No stats before the first load.
+  }
+  const needed = videoBps ? videoBps + AUDIO_BPS : stats.streamBandwidth;
+  const received = stats.estimatedBandwidth;
+  const slowNetwork = Boolean(received && needed && received < needed * BANDWIDTH_MARGIN);
+  if (slowNetwork) {
+    warn.textContent = TEXT.network;
+  } else if (buffering.length > MAX_BUFFERING_PER_MINUTE) {
+    warn.textContent = TEXT.stutter;
+  }
+  warn.style.display = slowNetwork || buffering.length > MAX_BUFFERING_PER_MINUTE ? 'block' : 'none';
+
+  if (!debug) {
+    lag.textContent = '';
+    return;
+  }
+  const range = player.getLiveSeekableRange();
+  const behind = range && range.end ? `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live` : '';
+  const speed = received ? `, ${(received / 1e6).toFixed(1)} Mbit/s received` : '';
+  lag.textContent = `${behind}${speed}, ${buffering.length} buffering/min`;
 }, 1000);
 
 context.start(options);

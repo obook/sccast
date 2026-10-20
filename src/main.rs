@@ -224,17 +224,15 @@ fn cast_screen(
         }
         let capture = hls.watch(stop)?;
         // The query is read by sccast's receiver page; the server ignores it.
-        let mut query = Vec::new();
+        // kbps lets the page tell a network too slow for the stream.
+        let mut query = vec![format!("kbps={}", stream.bitrate)];
         if let Some(latency) = s.latency {
             query.push(format!("latency={latency}"));
         }
         if cfg!(debug_assertions) {
             query.push("debug".to_string());
         }
-        let mut url = format!("http://{ip}:{}/{path}", stream.port);
-        if !query.is_empty() {
-            url = format!("{url}?{}", query.join("&"));
-        }
+        let url = format!("http://{ip}:{}/{path}?{}", stream.port, query.join("&"));
         let played = receiver.play(&url, content_type, true, stop, keep, &|r| out.report(r));
         stop.store(true, Ordering::SeqCst);
         // A capture failure explains why the cast stopped: report it first.
