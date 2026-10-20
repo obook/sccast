@@ -45,8 +45,9 @@ fn drive_menu(
     let screen = Arc::new(Mutex::new(Arc::new(screen)));
     // Stop and keep flags of the running cast, and its thread.
     let mut running: Option<(&'static AtomicBool, &'static AtomicBool, JoinHandle<()>)> = None;
-    // TV where the receiver may be open, and its app id.
-    let mut tv: Option<(CastDevice, String)> = None;
+    // TV where the receiver may be open, and its app id. Shared with close_on_signal.
+    let tv: Arc<Mutex<Option<(CastDevice, String)>>> = Arc::default();
+    close_on_signal(&tv, quit);
     // Error of a terminal closed without quitting: returned once the TV is freed.
     let mut lost = None;
     loop {
@@ -64,7 +65,8 @@ fn drive_menu(
         }
         // The receiver stays open on the TV between casts to the same TV, and after s:
         // the Sharp TV sometimes never answered a launch right after a close.
-        let same_tv = matches!((&action, &tv), (menu::Action::Cast(d), Some((open, _))) if d.id == open.id);
+        let same_tv =
+            matches!((&action, &*tv.lock().unwrap()), (menu::Action::Cast(d), Some((open, _))) if d.id == open.id);
         let keep_open = same_tv || matches!(action, menu::Action::Stop);
         if let Some((stop, keep, cast)) = running.take() {
             menu.set_status(menu::Status::Info("Stopping...".into()));
@@ -76,14 +78,15 @@ fn drive_menu(
             menu.set_status(menu::Status::Ended);
         } else if !keep_open {
             // A receiver left open by s, on this TV or another one.
-            if let Some((device, app_id)) = tv.take() {
+            let open = tv.lock().unwrap().take();
+            if let Some((device, app_id)) = open {
                 menu.set_status(menu::Status::Info(format!("Closing the receiver on {}...", device.name)));
                 let _ = menu.draw_now(terminal, s);
                 wait_for(&std::thread::spawn(move || drop(device::stop(&device, &app_id, None))));
             }
         }
         if !keep_open {
-            tv = None;
+            *tv.lock().unwrap() = None;
         }
         let device = match action {
             menu::Action::Quit => return lost.map_or(Ok(()), Err),
@@ -93,12 +96,14 @@ fn drive_menu(
         // ponytail: two leaked flags per cast (a few bytes), play() wants 'static flags.
         let stop: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
         let keep: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        stop_on_signal(stop, keep, quit);
         let out = Out::Menu(menu.status_sender());
         let settings = s.clone();
         let screen = Arc::clone(&screen.lock().unwrap());
         menu.set_casting(Some(device.id.clone()));
         // The mirror format closes its own app: nothing left open to track.
-        tv = (settings.stream.format != cli::Format::Mirror).then(|| (device.clone(), settings.receiver.clone()));
+        *tv.lock().unwrap() =
+            (settings.stream.format != cli::Format::Mirror).then(|| (device.clone(), settings.receiver.clone()));
         let cast = std::thread::spawn(move || match cast_screen(&device, &settings, &screen, stop, Some(keep), &out) {
             Ok(()) => out.send(menu::Status::Ended),
             // The sharing may have been stopped from the desktop.
@@ -109,6 +114,39 @@ fn drive_menu(
         });
         running = Some((stop, keep, cast));
     }
+}
+
+/// Stop the cast and close its receiver when `quit` is set by a signal, without the menu.
+/// Closing the Konsole tab stops reading the terminal first: the menu then blocks while it
+/// draws, never sees the signal, and the forced exit came 5 s later with the TV still taken.
+fn stop_on_signal(stop: &'static AtomicBool, keep: &'static AtomicBool, quit: &'static AtomicBool) {
+    std::thread::spawn(move || {
+        while !stop.load(Ordering::SeqCst) {
+            if quit.load(Ordering::SeqCst) {
+                keep.store(false, Ordering::SeqCst);
+                stop.store(true, Ordering::SeqCst);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+}
+
+/// When `quit` is set by a signal, close the receiver left open on `tv` (after s), without
+/// the menu, which may be stuck on the closed terminal. A running cast closes its own.
+fn close_on_signal(tv: &Arc<Mutex<Option<(CastDevice, String)>>>, quit: &'static AtomicBool) {
+    let tv = Arc::clone(tv);
+    std::thread::spawn(move || {
+        while !quit.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let open = tv.lock().unwrap().take();
+        if let Some((device, app_id)) = open {
+            if let Err(e) = device::stop(&device, &app_id, None) {
+                tracing::warn!("cannot close the receiver on {}: {e:#}", device.name);
+            }
+        }
+    });
 }
 
 /// Open the portal dialog in a thread: the menu keeps answering, the cast goes on meanwhile.
