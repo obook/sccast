@@ -29,7 +29,7 @@ fn log_path() -> std::path::PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into).join("sccast.log")
 }
 /// A normal launch takes 2 to 6 s, the fallback to Google's receiver included.
-const LAUNCH_TIMEOUT: Duration = Duration::from_secs(20);
+const RETRY_DELAY: Duration = Duration::from_secs(2);
 const SEARCHING: &str = "Searching for Chromecast devices, please wait...";
 
 fn main() -> anyhow::Result<()> {
@@ -84,13 +84,13 @@ fn main() -> anyhow::Result<()> {
             let port = settings.stream.port;
 
             if let Some(url) = url {
-                return launch(&device, &settings.receiver, false, &out)?
+                return launch(&device, &settings.receiver, false, stop, &out)?
                     .play(&url, "video/mp4", false, stop, &NO_KEEP, &say);
             }
             if let Some(file) = file {
                 let ip = server::lan_ip(device.ip.into())?;
                 let _server = server::serve_file(&file, port, stop)?;
-                let receiver = launch(&device, &settings.receiver, false, &out)?;
+                let receiver = launch(&device, &settings.receiver, false, stop, &out)?;
                 return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop, &NO_KEEP, &say);
             }
             let screen = portal::ScreenCast::open()?;
@@ -203,11 +203,7 @@ fn cast_screen(
     }
     let played = (|| {
         // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
-        let launched: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
-        watch_launch(launched, stop, hls.halter(), out.clone(), device.name.clone());
-        let receiver = launch(device, &s.receiver, reuse, out);
-        launched.store(true, Ordering::SeqCst);
-        let receiver = receiver?;
+        let receiver = launch(device, &s.receiver, reuse, stop, out)?;
         let prepared = out.step("Preparing the stream...", || -> anyhow::Result<()> {
             while stream.format == cli::Format::Hls
                 && hls.segments()? < capture::MIN_SEGMENTS
@@ -262,40 +258,6 @@ fn watch_round_trip(device: &discovery::CastDevice, stop: &'static AtomicBool, o
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-        }
-    });
-}
-
-/// The Sharp TV sometimes never answers a launch (black screen, then its home screen), and
-/// rust_cast has no timeout. If `launched` is still false after LAUNCH_TIMEOUT, stop the capture
-/// and the server, and report. ponytail: the blocked launch call stays behind, on its socket.
-fn watch_launch(
-    launched: &'static AtomicBool,
-    stop: &'static AtomicBool,
-    halt: impl FnOnce() + Send + 'static,
-    out: Out,
-    name: String,
-) {
-    std::thread::spawn(move || {
-        let started = Instant::now();
-        while !launched.load(Ordering::SeqCst) && started.elapsed() < LAUNCH_TIMEOUT {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        if launched.load(Ordering::SeqCst) {
-            return;
-        }
-        stop.store(true, Ordering::SeqCst);
-        halt();
-        let message = format!(
-            "{name} did not start the receiver within {} s. Try again; if it fails again, restart the TV",
-            LAUNCH_TIMEOUT.as_secs()
-        );
-        match out {
-            Out::Term => {
-                eprintln!("Error: {message}");
-                std::process::exit(1);
-            }
-            Out::Menu(_) => out.send(menu::Status::Error(message)),
         }
     });
 }
@@ -443,11 +405,32 @@ fn spin<T>(message: &str, f: impl FnOnce() -> T) -> T {
     })
 }
 
-/// Resolve `--device`, or let the user pick one from the devices found.
 /// Start the receiver on `device`, telling the user when sccast's own fell back to Google's.
-fn launch(device: &discovery::CastDevice, app_id: &str, reuse: bool, out: &Out) -> anyhow::Result<cast::Receiver> {
-    let receiver =
-        out.step(&format!("Starting the receiver on {}...", device.name), || cast::launch(device, app_id, reuse))?;
+/// With `reuse` (the menu), try again without limit: the first launch on a Chromecast can fail,
+/// the user sees each try and can stop.
+fn launch(
+    device: &discovery::CastDevice,
+    app_id: &str,
+    reuse: bool,
+    stop: &'static AtomicBool,
+    out: &Out,
+) -> anyhow::Result<cast::Receiver> {
+    let mut tries = 1;
+    let receiver = loop {
+        let label = match tries {
+            1 => format!("Starting the receiver on {}...", device.name),
+            n => format!("Starting the receiver on {} (try {n})...", device.name),
+        };
+        match out.step(&label, || cast::launch(device, app_id, reuse, stop)) {
+            Ok(receiver) => break receiver,
+            Err(e) if reuse && !stop.load(Ordering::SeqCst) => {
+                tracing::warn!(tries, "launch failed: {e:#}");
+                tries += 1;
+                std::thread::sleep(RETRY_DELAY);
+            }
+            Err(e) => return Err(e),
+        }
+    };
     if receiver.app_id() != app_id {
         out.say(&format!(
             "The sccast receiver did not start on {}: using Google's receiver (about 5 s of delay).",
@@ -457,6 +440,7 @@ fn launch(device: &discovery::CastDevice, app_id: &str, reuse: bool, out: &Out) 
     Ok(receiver)
 }
 
+/// Resolve `--device`, or let the user pick one from the devices found.
 fn pick_device(query: Option<&str>) -> anyhow::Result<discovery::CastDevice> {
     if let Some(query) = query {
         let found = spin(&format!("Looking for {query}..."), || discovery::find(query, DISCOVERY_TIMEOUT))?;

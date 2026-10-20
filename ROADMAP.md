@@ -33,6 +33,8 @@ To do:
 - [x] Warning on the TV, top right, with sccast's receiver: network too slow (Shaka's bandwidth estimate against the stream bitrate) or frequent buffering
 - [ ] Check the TV warning on a congested network (school)
 - [ ] Unpublish the receiver in the Google Cast console and check the fallback to Google's receiver
+- [x] In the menu, retry the launch and the reconnection without limit. A launch waits 75 s: at its first launch a Chromecast gave up on sccast's receiver after 63 s (CAST_INIT_TIMEOUT), the next one took 2 s
+- [ ] Check the retry on a cold Chromecast (just plugged in)
 
 If needed:
 

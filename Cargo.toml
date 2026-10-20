@@ -17,7 +17,8 @@ futures-core = "0.3.34"
 gstreamer = "0.25.4"
 mdns-sd = "0.21.5"
 ratatui = "0.30.2"
-rust_cast = "0.21.0"
+# thread_safe: the launch runs in a thread, so it can be given up after a timeout.
+rust_cast = { version = "0.21.0", features = ["thread_safe"] }
 tempfile = "3.27.0"
 tokio = { version = "1.54.0", features = ["rt", "net", "time"] }
 tokio-util = { version = "0.7.20", features = ["io"] }

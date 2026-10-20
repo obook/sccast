@@ -153,8 +153,11 @@ Stutter, or sound ahead of a frozen image, on moving content: the TV may not
 decode 1080p in real time. Try `--resolution 1280x720 --bitrate 2500`.
 
 The TV drops back to its home screen: `sccast` launches the receiver again,
-up to 3 times in 5 minutes. If the device no longer shows in `sccast list`,
-unplug it and plug it back in.
+up to 3 times in 5 minutes, without limit in the menu. If the device no
+longer shows in `sccast list`, unplug it and plug it back in.
+
+The first launch on a Chromecast can fail after about a minute: the menu
+tries again by itself, the next launch takes a few seconds.
 
 Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
 `$XDG_RUNTIME_DIR/sccast.log`, emptied at each start.

@@ -23,6 +23,9 @@ const MAX_RECONNECTS: u32 = 3;
 // A drop this long after the previous one starts a new count.
 const RECONNECT_WINDOW: Duration = Duration::from_secs(300);
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+// At its first launch a Chromecast gave up loading sccast's receiver after 63 s (CAST_INIT_TIMEOUT).
+// Wait for that answer: retrying sooner may restart its loading (not checked).
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(75);
 
 fn connect(device: &Device) -> anyhow::Result<CastDevice<'static>> {
     // Chromecasts use self-signed certificates.
@@ -61,6 +64,8 @@ pub struct Receiver {
     cast: CastDevice<'static>,
     app: Application,
     device: Device,
+    /// Launched by the menu: reconnect without limit, the user sees it and can stop it.
+    forever: bool,
 }
 
 /// Launch the receiver app `app_id` on `device`. If a custom receiver does not start
@@ -68,7 +73,27 @@ pub struct Receiver {
 /// The TV shows the Cast screen.
 /// With `reuse`, attach to that receiver if it already runs (left open by the menu between
 /// two casts): the Sharp TV sometimes never answered a launch right after a close.
-pub fn launch(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Receiver> {
+/// Gives up after LAUNCH_TIMEOUT or when `stop` is set: rust_cast has no timeout of its own.
+pub fn launch(device: &Device, app_id: &str, reuse: bool, stop: &'static AtomicBool) -> anyhow::Result<Receiver> {
+    let (sender, answer) = std::sync::mpsc::channel();
+    let (target, id) = (device.clone(), app_id.to_string());
+    // ponytail: a launch given up stays blocked on its socket, until the device answers or closes it.
+    std::thread::spawn(move || drop(sender.send(start(&target, &id, reuse))));
+    let started = Instant::now();
+    while started.elapsed() < LAUNCH_TIMEOUT {
+        if stop.load(Ordering::SeqCst) {
+            anyhow::bail!("stopped before the receiver started");
+        }
+        match answer.recv_timeout(Duration::from_millis(100)) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(e) => anyhow::bail!("launch thread ended: {e}"),
+        }
+    }
+    anyhow::bail!("{} did not start the receiver within {} s", device.name, LAUNCH_TIMEOUT.as_secs())
+}
+
+fn start(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Receiver> {
     let cast = connect(device)?;
     cast.heartbeat.ping()?;
 
@@ -78,7 +103,7 @@ pub fn launch(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Rece
         if let Some(app) = status.applications.iter().find(ours) {
             tracing::info!(session = %app.session_id, app_id = %app.app_id, "reusing the receiver");
             cast.connection.connect(app.transport_id.clone())?;
-            return Ok(Receiver { cast, app: app.clone(), device: device.clone() });
+            return Ok(Receiver { cast, app: app.clone(), device: device.clone(), forever: reuse });
         }
     }
     // A receiver left running in the background (closed with the TV remote) is reused by
@@ -90,6 +115,10 @@ pub fn launch(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Rece
 
     let app = match cast.receiver.launch_app(&CastDeviceApp::Custom(app_id.to_string())) {
         Ok(app) => app,
+        // The menu tries sccast's receiver again: its next launch took 2 s, Google's plays 5 s late.
+        Err(e) if reuse && e.to_string().contains("CAST_INIT_TIMEOUT") => {
+            return Err(e).with_context(|| format!("{} could not load the sccast receiver", device.name));
+        }
         Err(e) if app_id != DEFAULT_MEDIA_RECEIVER => {
             tracing::warn!("cannot launch the receiver app {app_id}: {e}");
             cast.receiver
@@ -100,7 +129,7 @@ pub fn launch(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Rece
     };
     tracing::info!(session = %app.session_id, app_id = %app.app_id, "receiver launched");
     cast.connection.connect(app.transport_id.clone())?;
-    Ok(Receiver { cast, app, device: device.clone() })
+    Ok(Receiver { cast, app, device: device.clone(), forever: reuse })
 }
 
 impl Receiver {
@@ -172,6 +201,7 @@ impl Receiver {
             duration: None,
         };
         let device = receiver.device.clone();
+        let limit = if receiver.forever { u32::MAX } else { MAX_RECONNECTS };
         let mut drops = 0;
         let mut last_drop = Instant::now();
         loop {
@@ -204,7 +234,7 @@ impl Receiver {
                 }
                 drops += 1;
                 last_drop = Instant::now();
-                if drops > MAX_RECONNECTS {
+                if drops > limit {
                     anyhow::bail!(
                         "lost {} ({why}), gave up after {MAX_RECONNECTS} reconnections. \
                          If it no longer shows in `sccast list`, unplug it and plug it back in",
@@ -212,11 +242,13 @@ impl Receiver {
                     );
                 }
                 report(Report::Reconnecting);
-                report(Report::Say(&format!("Lost {} ({why}). Reconnecting ({drops}/{MAX_RECONNECTS})...", device.name)));
+                let count = if receiver.forever { drops.to_string() } else { format!("{drops}/{MAX_RECONNECTS}") };
+                report(Report::Say(&format!("Lost {} ({why}). Reconnecting ({count})...", device.name)));
                 std::thread::sleep(RECONNECT_DELAY);
                 // A fresh launch: the session was lost, an attached app may be in the background.
-                match launch(&device, &app_id, false) {
-                    Ok(new) => {
+                match launch(&device, &app_id, false, stop) {
+                    Ok(mut new) => {
+                        new.forever = receiver.forever;
                         receiver = new;
                         *session.lock().unwrap() = receiver.app.session_id.clone();
                         break;

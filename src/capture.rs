@@ -149,14 +149,6 @@ impl Capture {
         Some(move || out.property::<u64>("bytes-served"))
     }
 
-    /// Stops the pipeline from another thread, when the one owning the capture is stuck.
-    pub fn halter(&self) -> impl FnOnce() + Send + 'static {
-        let pipeline = self.pipeline.clone();
-        move || {
-            let _ = pipeline.set_state(gst::State::Null);
-        }
-    }
-
     pub fn dir(&self) -> &Path {
         self.dir.path()
     }
