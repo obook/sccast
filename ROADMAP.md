@@ -26,8 +26,10 @@ To do:
 - [x] First GitHub release with both .deb (v0.1.0)
 - [x] Launch menu (ratatui): device list, presets and settings, prefilled from the command line
 - [x] Keep the menu during the cast: state, stats, change settings or device, stop, quit with Ctrl+C
-- [ ] Warn when the PC is too loaded to stream (dropped frames, late segments)
-- [ ] Warn when the network is congested (slow segment downloads by the TV, round trip to its Cast port, buffering per minute)
+- [x] Menu alerts: frames lost by the capture, round trip to the TV, segment send time (thresholds not tuned yet)
+- [ ] Alert when the TV buffers often (more than 2 per minute): the most frequent problem, and the one the TV reports itself
+- [ ] Measure segment downloads on the TV side: the send time on the PC only shows a badly congested network (kernel buffers)
+- [ ] Tune the alert thresholds on the school network
 - [ ] Show these warnings on the TV, top right, with sccast's receiver only (page-side player stats, or a custom Cast message from sccast)
 
 If needed:

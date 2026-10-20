@@ -2152,6 +2152,7 @@ dependencies = [
  "axum",
  "clap",
  "ctrlc",
+ "futures-core",
  "gstreamer",
  "mdns-sd",
  "ratatui",

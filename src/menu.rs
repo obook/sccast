@@ -1,8 +1,9 @@
 //! Launch menu: pick a device found on the network and adjust the stream settings.
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -72,6 +73,10 @@ pub enum Status {
     Segments(PathBuf),
     /// Bytes sent so far by the Matroska server, for the same measure.
     Served(ByteCounter),
+    /// Frames dropped by the capture since the start.
+    Dropped(Arc<AtomicU64>),
+    /// Time to connect to the TV's Cast port, None if it did not answer.
+    RoundTrip(Option<Duration>),
 }
 
 pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
@@ -94,7 +99,24 @@ struct Live {
     /// Percent of one core.
     cpu: f64,
     sampled: Option<Instant>,
+    dropped: Option<Arc<AtomicU64>>,
+    /// Dropped frames total, one sample per second, last minute.
+    dropped_history: VecDeque<u64>,
+    /// Average download time of the last segments by the TV.
+    fetch: Option<Duration>,
+    /// None until measured; Some(None) when the TV did not answer.
+    round_trip: Option<Option<Duration>>,
+    /// Seconds sampled, to log a summary every 10.
+    samples: u64,
 }
+
+// Alert thresholds. ponytail: first guesses, to adjust with tests (the school network in particular).
+/// One second of video lost per minute.
+const DROPPED_PER_MINUTE: u64 = 30;
+/// One second of video must reach the TV well within one second.
+const SLOW_FETCH: Duration = Duration::from_millis(500);
+const CONGESTED_FETCH: Duration = Duration::from_millis(900);
+const SLOW_ROUND_TRIP: Duration = Duration::from_millis(100);
 
 impl Live {
     /// Refresh the measures once a second.
@@ -125,6 +147,23 @@ impl Live {
         if self.bitrate.len() > 60 {
             self.bitrate.remove(0);
         }
+        if let Some(dropped) = &self.dropped {
+            self.dropped_history.push_back(dropped.load(Ordering::Relaxed));
+            if self.dropped_history.len() > 61 {
+                self.dropped_history.pop_front();
+            }
+        }
+        self.fetch = crate::server::segment_fetch_time();
+        self.samples += 1;
+        if self.samples.is_multiple_of(10) {
+            tracing::info!(
+                lost_last_minute = self.dropped_last_minute(),
+                fetch_ms = self.fetch.map(|f| f.as_millis() as u64),
+                ping_ms = ?self.round_trip.map(|r| r.map(|r| r.as_millis() as u64)),
+                cpu = self.cpu as u64,
+                "live"
+            );
+        }
         if let Some(ticks) = cpu_ticks() {
             if let Some((before, at)) = self.cpu_ticks {
                 // ponytail: assumes 100 ticks per second (the Linux default), read sysconf if it ever differs.
@@ -132,6 +171,32 @@ impl Live {
             }
             self.cpu_ticks = Some((ticks, Instant::now()));
         }
+    }
+
+    fn dropped_last_minute(&self) -> u64 {
+        match (self.dropped_history.front(), self.dropped_history.back()) {
+            (Some(first), Some(last)) => last - first,
+            _ => 0,
+        }
+    }
+
+    /// The worst problem seen, with its color, or None when all is well.
+    fn alert(&self) -> Option<(String, Color)> {
+        let dropped = self.dropped_last_minute();
+        if self.round_trip == Some(None) {
+            return Some(("The TV does not answer on the network".into(), Color::Red));
+        }
+        if dropped > DROPPED_PER_MINUTE {
+            return Some((format!("PC too slow: {dropped} frames lost in a minute. Lower the resolution or close programs"), Color::Red));
+        }
+        if let Some(fetch) = self.fetch.filter(|f| *f > SLOW_FETCH) {
+            let color = if fetch > CONGESTED_FETCH { Color::Red } else { Color::Yellow };
+            return Some((format!("Network slow: 1 s of video takes {:.1} s to reach the TV. Lower the bitrate", fetch.as_secs_f64()), color));
+        }
+        if let Some(Some(rtt)) = self.round_trip.filter(|r| r.is_some_and(|r| r > SLOW_ROUND_TRIP)) {
+            return Some((format!("Network slow: {} ms to reach the TV", rtt.as_millis()), Color::Yellow));
+        }
+        None
     }
 }
 
@@ -217,6 +282,8 @@ impl Menu {
             Status::Reconnecting => self.live.reconnects += 1,
             Status::Segments(dir) => self.live.segments = Some(dir),
             Status::Served(counter) => self.live.served = Some((counter, None)),
+            Status::Dropped(counter) => self.live.dropped = Some(counter),
+            Status::RoundTrip(time) => self.live.round_trip = Some(time),
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
@@ -322,7 +389,7 @@ impl Menu {
     }
 
     fn draw(&mut self, f: &mut Frame, s: &Settings) {
-        let live_height = if self.live.started.is_some() { 6 } else { 0 };
+        let live_height = if self.live.started.is_some() { 7 } else { 0 };
         let [header, body, live, footer] = Layout::vertical([
             Constraint::Length(5),
             Constraint::Min(ROWS.len() as u16 + 2),
@@ -354,8 +421,13 @@ impl Menu {
         };
         // Status on its own line: errors are long.
         let status = Line::from(Span::styled(format!(" {text}"), Style::new().fg(color).add_modifier(Modifier::BOLD)));
+        let mut lines = vec![title, status];
+        // Alerts take the full width: they are long, and must be seen.
+        if let Some((alert, color)) = self.live.started.and(self.live.alert()) {
+            lines.push(Line::from(Span::styled(format!(" ⚠ {alert}"), Style::new().fg(color).add_modifier(Modifier::BOLD))));
+        }
         f.render_widget(
-            Paragraph::new(vec![title, status]).wrap(ratatui::widgets::Wrap { trim: false }).block(rounded(false)),
+            Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }).block(rounded(false)),
             header,
         );
 
@@ -430,6 +502,7 @@ impl Menu {
 
         let elapsed = live.started.map_or(0, |t| t.elapsed().as_secs());
         let recent = live.buffering.iter().filter(|t| t.elapsed() < Duration::from_secs(60)).count();
+        let dropped = live.dropped_last_minute();
         let tv_color = match live.tv.as_str() {
             "Playing" => Color::Green,
             "Buffering" => Color::Yellow,
@@ -452,11 +525,30 @@ impl Menu {
             Line::from(vec![
                 label("Reconnects"),
                 bold(live.reconnects.to_string(), warn(live.reconnects > 0)),
+                Span::styled("   Lost frames ", Style::new().fg(Color::Gray)),
+                bold(format!("{dropped} last minute"), warn(dropped > DROPPED_PER_MINUTE)),
             ]),
             Line::from(vec![
                 label("CPU"),
                 bold(format!("{:.0} % of a core", live.cpu), warn(live.cpu > 150.0)),
                 Span::styled(format!("   load {}", load_average().unwrap_or_default()), Style::new().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                label("Network"),
+                // Time for the TV to download one 1-second segment.
+                bold(
+                    live.fetch.map_or("-".into(), |f| format!("segment {:.2} s", f.as_secs_f64())),
+                    warn(live.fetch.is_some_and(|f| f > SLOW_FETCH)),
+                ),
+                Span::styled("   ping ", Style::new().fg(Color::Gray)),
+                bold(
+                    match live.round_trip {
+                        None => "-".into(),
+                        Some(None) => "no answer".into(),
+                        Some(Some(rtt)) => format!("{} ms", rtt.as_millis()),
+                    },
+                    warn(live.round_trip.is_some_and(|r| r.is_none_or(|r| r > SLOW_ROUND_TRIP))),
+                ),
             ]),
         ];
         f.render_widget(Paragraph::new(lines).block(rounded(false).title(" Live ")), text_area);
@@ -547,6 +639,21 @@ mod tests {
     }
 
     #[test]
+    fn alerts_follow_thresholds() {
+        let mut live = Live::default();
+        assert!(live.alert().is_none());
+        live.round_trip = Some(Some(Duration::from_millis(250)));
+        assert_eq!(live.alert().unwrap().1, Color::Yellow);
+        live.fetch = Some(Duration::from_millis(950));
+        assert!(live.alert().unwrap().0.starts_with("Network slow: 1 s of video"));
+        assert_eq!(live.alert().unwrap().1, Color::Red);
+        live.dropped_history = VecDeque::from([0, 45]);
+        assert!(live.alert().unwrap().0.starts_with("PC too slow"));
+        live.round_trip = Some(None);
+        assert!(live.alert().unwrap().0.contains("does not answer"));
+    }
+
+    #[test]
     fn draws_and_applies_presets() {
         let stream = Stream {
             resolution: (1920, 1080),
@@ -581,9 +688,11 @@ mod tests {
         menu.live.started = Instant::now().checked_sub(Duration::from_secs(754));
         menu.live.buffering = vec![Instant::now().checked_sub(Duration::from_secs(400)).unwrap()];
         menu.live.cpu = 62.0;
+        menu.live.fetch = Some(Duration::from_millis(120));
+        menu.live.round_trip = Some(Some(Duration::from_millis(3)));
         menu.live.bitrate = (0..60).map(|i| 2500 + (i * 37 % 11) * 40 - 200).collect();
 
-        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 25)).unwrap();
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 26)).unwrap();
         terminal.draw(|f| menu.draw(f, &s)).unwrap();
         let buffer = terminal.backend().buffer();
         let screen: Vec<&str> = buffer.content().iter().map(|c| c.symbol()).collect();

@@ -1,5 +1,6 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -67,6 +68,8 @@ pub struct Capture {
     dir: TempDir,
     /// Local port of the Matroska stream (mkv format only).
     pub tcp_port: Option<u16>,
+    /// Frames dropped before the encoder since the start: the PC is too slow.
+    pub dropped: Arc<AtomicU64>,
 }
 
 impl Capture {
@@ -88,7 +91,7 @@ impl Capture {
             // stamps put the sound ahead of the image). Leaky: drop frames rather than lag.
             Some(screen) => format!(
                 "pipewiresrc name=src fd={} path={} keepalive-time=100 \
-                 ! queue leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 \
+                 ! queue name=vq leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 \
                  ! videorate",
                 screen.fd(),
                 screen.node_id
@@ -110,6 +113,16 @@ impl Capture {
         if let Some(src) = bin.by_name("src") {
             restamp_on_arrival(&src, &pipeline)?;
         }
+        // The leaky queue before the encoder overflows when the PC cannot encode fast enough:
+        // each overrun drops a frame.
+        let dropped = Arc::new(AtomicU64::new(0));
+        if let Some(queue) = bin.by_name("vq") {
+            let dropped = Arc::clone(&dropped);
+            queue.connect("overrun", false, move |_| {
+                dropped.fetch_add(1, Ordering::Relaxed);
+                None
+            });
+        }
         if let Some(asrc) = bin.by_name("asrc") {
             let pad = asrc.static_pad("src").context("audio source has no src pad")?;
             pad.set_offset(audio_delay.as_nanos() as i64);
@@ -127,7 +140,7 @@ impl Capture {
             None => None,
         };
         tracing::info!(dir = %dir.path().display(), ?tcp_port, "capture started");
-        Ok(Self { pipeline, dir, tcp_port })
+        Ok(Self { pipeline, dir, tcp_port, dropped })
     }
 
     /// Bytes sent so far by the Matroska server (mkv format only), to measure the bitrate.

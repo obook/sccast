@@ -196,6 +196,10 @@ fn cast_screen(
     if let Some(served) = hls.served() {
         out.send(menu::Status::Served(Box::new(served)));
     }
+    out.send(menu::Status::Dropped(Arc::clone(&hls.dropped)));
+    if let Out::Menu(_) = out {
+        watch_round_trip(device, stop, out.clone());
+    }
     let played = (|| {
         // The capture fills segments while the TV starts its receiver (2-3 s): both waits overlap.
         let launched: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
@@ -242,6 +246,25 @@ fn cast_screen(
     drop(hls);
     let _ = server.join();
     played
+}
+
+/// Every 5 s until `stop`, time a TCP connection to the TV's Cast port: a congested network
+/// shows there (the school's Chromecast answered in 170 to 500 ms, the test TV in 2 ms).
+fn watch_round_trip(device: &discovery::CastDevice, stop: &'static AtomicBool, out: Out) {
+    let address = std::net::SocketAddr::from((device.ip, device.port));
+    std::thread::spawn(move || {
+        while !stop.load(Ordering::SeqCst) {
+            let started = Instant::now();
+            let answered = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok();
+            out.send(menu::Status::RoundTrip(answered.then(|| started.elapsed())));
+            for _ in 0..50 {
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    });
 }
 
 /// The Sharp TV sometimes never answers a launch (black screen, then its home screen), and
