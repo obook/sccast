@@ -12,7 +12,7 @@ use rust_cast::{CastDevice, ChannelMessage};
 use crate::discovery::CastDevice as Device;
 
 const RECEIVER: &str = "receiver-0";
-const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
+pub const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
 // ponytail: counted over the whole cast, not per hour; reset it if long casts hit the cap.
 const MAX_RELOADS: u32 = 3;
 // Idle screen of Chromecasts without Google TV: not an app that took the screen.
@@ -30,43 +30,47 @@ fn connect(device: &Device) -> anyhow::Result<CastDevice<'static>> {
     Ok(cast)
 }
 
-/// Close the Default Media Receiver on `device`: the session `session`, or whichever one runs.
+/// Close the receiver app `app_id` on `device`: the session `session`, or whichever one runs.
 /// Apps launched by other senders (YouTube, Netflix...) are left alone.
 /// Returns false when there was nothing to close.
-pub fn stop(device: &Device, session: Option<&str>) -> anyhow::Result<bool> {
+pub fn stop(device: &Device, app_id: &str, session: Option<&str>) -> anyhow::Result<bool> {
     let cast = connect(device)?;
     let status = cast.receiver.get_status()?;
     let app = status.applications.iter().find(|a| match session {
         Some(session) => a.session_id == session,
-        None => a.app_id == DEFAULT_MEDIA_RECEIVER,
+        None => a.app_id == app_id,
     });
     let Some(app) = app else { return Ok(false) };
     cast.receiver.stop_app(app.session_id.clone())?;
     Ok(true)
 }
 
-/// Default Media Receiver running on a device, ready to play.
+/// Receiver app running on a device, ready to play.
 pub struct Receiver {
     cast: CastDevice<'static>,
     app: Application,
     device: Device,
 }
 
-/// Launch the Default Media Receiver on `device`. The TV shows the Cast screen.
-pub fn launch(device: &Device) -> anyhow::Result<Receiver> {
+/// Launch the receiver app `app_id` on `device` (Default Media Receiver or a custom one).
+/// The TV shows the Cast screen.
+pub fn launch(device: &Device, app_id: &str) -> anyhow::Result<Receiver> {
     let cast = connect(device)?;
     cast.heartbeat.ping()?;
 
     // A receiver left running in the background (closed with the TV remote) is reused by
     // LAUNCH without coming back on screen: close it so the TV switches to the new one.
     let status = cast.receiver.get_status()?;
-    if let Some(old) = status.applications.iter().find(|a| a.app_id == DEFAULT_MEDIA_RECEIVER) {
+    if let Some(old) = status.applications.iter().find(|a| a.app_id == app_id) {
         tracing::info!(session = %old.session_id, "closing previous receiver");
         cast.receiver.stop_app(old.session_id.clone())?;
     }
 
-    let app = cast.receiver.launch_app(&CastDeviceApp::DefaultMediaReceiver)?;
-    tracing::info!(session = %app.session_id, "receiver launched");
+    let app = cast
+        .receiver
+        .launch_app(&CastDeviceApp::Custom(app_id.to_string()))
+        .with_context(|| format!("cannot launch the receiver app {app_id} on {}", device.name))?;
+    tracing::info!(session = %app.session_id, app_id, "receiver launched");
     cast.connection.connect(app.transport_id.clone())?;
     Ok(Receiver { cast, app, device: device.clone() })
 }
@@ -87,8 +91,10 @@ impl Receiver {
         // receive() blocks until the next message (up to ~5 s): close the app
         // from a second connection so Ctrl+C frees the TV at once.
         let session = Arc::new(Mutex::new(receiver.app.session_id.clone()));
+        let app_id = receiver.app.app_id.clone();
         let watcher = {
             let device = receiver.device.clone();
+            let app_id = app_id.clone();
             let session = Arc::clone(&session);
             std::thread::spawn(move || {
                 while !stop.load(Ordering::SeqCst) {
@@ -96,7 +102,7 @@ impl Receiver {
                 }
                 tracing::info!("stopping");
                 let session = session.lock().unwrap().clone();
-                if let Err(e) = self::stop(&device, Some(&session)) {
+                if let Err(e) = self::stop(&device, &app_id, Some(&session)) {
                     tracing::warn!("cannot close the receiver app: {e:#}");
                 }
             })
@@ -137,7 +143,7 @@ impl Receiver {
                 }
                 eprintln!("Lost {} ({why}). Reconnecting ({drops}/{MAX_RECONNECTS})...", device.name);
                 std::thread::sleep(RECONNECT_DELAY);
-                match launch(&device) {
+                match launch(&device, &app_id) {
                     Ok(new) => {
                         receiver = new;
                         *session.lock().unwrap() = receiver.app.session_id.clone();
