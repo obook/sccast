@@ -14,24 +14,32 @@
 <div id="lag"></div>
 <script>
 // Seconds behind the newest segment. Shaka's HLS default is 3 segments (3 s for sccast).
-const TARGET_LATENCY = 1.5;
+// sccast --latency overrides it with ?latency= on the stream URL.
+const DEFAULT_LATENCY = 2.5;
 
 const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
 
-const playback = new cast.framework.PlaybackConfig();
-playback.shakaConfig = {
-  manifest: { defaultPresentationDelay: TARGET_LATENCY },
-  // Plays slightly faster when it falls behind, instead of staying late after a stall.
-  streaming: { liveSync: { enabled: true, targetLatency: TARGET_LATENCY, maxPlaybackRate: 1.1 } },
-};
+player.setMediaPlaybackInfoHandler((request, config) => {
+  const url = new URL(request.media.contentId);
+  const latency = Number(url.searchParams.get('latency')) || DEFAULT_LATENCY;
+  config.shakaConfig = {
+    manifest: { defaultPresentationDelay: latency },
+    streaming: {
+      // Shaka waits for 2 s of buffer by default: never reached this close to live.
+      rebufferingGoal: Math.min(0.5, latency / 4),
+      // Plays slightly faster when it falls behind, instead of staying late after a stall.
+      liveSync: { enabled: true, targetLatency: latency, maxPlaybackRate: 1.1 },
+    },
+  };
+  return config;
+});
 
 const options = new cast.framework.CastReceiverOptions();
 options.useShakaForHls = true;
 options.shakaVersion = '4.15.56';
-options.playbackConfig = playback;
 
-// Shown on the TV while tuning TARGET_LATENCY.
+// Shown on the TV while tuning the latency.
 const lag = document.getElementById('lag');
 setInterval(() => {
   const range = player.getLiveSeekableRange();
