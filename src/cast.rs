@@ -37,7 +37,8 @@ fn connect(device: &Device) -> anyhow::Result<CastDevice<'static>> {
 
 /// Close a receiver app on `device`: the session `session`, or whichever of `app_id` and the
 /// Default Media Receiver (its fallback) runs.
-/// Apps launched by other senders (YouTube, Netflix...) are left alone.
+/// Apps launched by other senders (YouTube, Netflix...) are left alone. A Default Media
+/// Receiver started by another sender cannot be told from sccast's fallback: it is closed too.
 /// Returns false when there was nothing to close.
 pub fn stop(device: &Device, app_id: &str, session: Option<&str>) -> anyhow::Result<bool> {
     let cast = connect(device)?;
@@ -78,7 +79,12 @@ pub fn launch(device: &Device, app_id: &str, reuse: bool, stop: &'static AtomicB
     let (sender, answer) = std::sync::mpsc::channel();
     let (target, id) = (device.clone(), app_id.to_string());
     // ponytail: a launch given up stays blocked on its socket, until the device answers or closes it.
-    std::thread::spawn(move || drop(sender.send(start(&target, &id, reuse))));
+    std::thread::spawn(move || {
+        // Nobody waits any more (stop or timeout): close the receiver a late answer opened.
+        if let Err(std::sync::mpsc::SendError(Ok(late))) = sender.send(start(&target, &id, reuse)) {
+            late.close();
+        }
+    });
     let started = Instant::now();
     while started.elapsed() < LAUNCH_TIMEOUT {
         if stop.load(Ordering::SeqCst) {
@@ -295,17 +301,37 @@ fn play_session(
     report: &dyn Fn(Report),
 ) -> anyhow::Result<Outcome> {
     let url = &media.content_id;
+    let close_app = || {
+        if let Err(e) = cast.receiver.stop_app(app.session_id.clone()) {
+            tracing::warn!("cannot close the receiver app: {e}");
+        }
+    };
     let load = || -> anyhow::Result<i32> {
-        let mut tries = 0;
+        let (mut unreadable, mut refused) = (0, 0);
         let loaded = loop {
             match cast.media.load(app.transport_id.clone(), app.session_id.clone(), media) {
                 Ok(loaded) => break loaded,
                 // A reused receiver may still report errors of the stream it played (e.g. 310,
                 // unknown to rust_cast), which fail this LOAD: send it again.
-                Err(e @ rust_cast::errors::Error::Parsing(_)) if tries < 3 => {
-                    tries += 1;
+                Err(e @ rust_cast::errors::Error::Parsing(_)) if unreadable < 3 => {
+                    unreadable += 1;
                     tracing::warn!("unreadable answer to LOAD ({e}), sending it again");
                     std::thread::sleep(Duration::from_millis(500));
+                }
+                // rust_cast turns LOAD_FAILED into this message. The Sharp refused once right
+                // after sccast was restarted, and accepted the next try.
+                Err(rust_cast::errors::Error::Internal(m)) if m == "Failed to load media." => {
+                    if refused == MAX_RELOADS {
+                        close_app();
+                        anyhow::bail!(
+                            "{} refused the stream: it may not decode this format, \
+                             try a lower --resolution (e.g. 1280x720) or --bitrate",
+                            device.name
+                        );
+                    }
+                    refused += 1;
+                    tracing::warn!(attempt = refused, "stream refused, loading it again");
+                    std::thread::sleep(Duration::from_secs(1));
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -319,14 +345,17 @@ fn play_session(
         report(Report::Loaded(&app.transport_id, media_session));
         Ok(media_session)
     };
-    let mut media_session = load()?;
+    // A connection error during a LOAD is a drop: play() reconnects.
+    let lost = |e: anyhow::Error| match e.downcast_ref::<rust_cast::errors::Error>() {
+        Some(rust_cast::errors::Error::Io(_) | rust_cast::errors::Error::Tls(_)) => Ok(Outcome::Lost(format!("{e:#}"))),
+        _ => Err(e),
+    };
+    let mut media_session = match load() {
+        Ok(session) => session,
+        Err(e) => return lost(e),
+    };
     let mut reloads = 0;
 
-    let close_app = || {
-        if let Err(e) = cast.receiver.stop_app(app.session_id.clone()) {
-            tracing::warn!("cannot close the receiver app: {e}");
-        }
-    };
     report(Report::Say(&format!("Casting to {}. Ctrl+C stops.", device.name)));
     let mut app_seen = false;
     loop {
@@ -366,7 +395,10 @@ fn play_session(
                         if live && gave_up && reloads < MAX_RELOADS {
                             reloads += 1;
                             tracing::warn!(attempt = reloads, "reloading the stream");
-                            media_session = load()?;
+                            media_session = match load() {
+                                Ok(session) => session,
+                                Err(e) => return lost(e),
+                            };
                             break;
                         }
                         return Ok(Outcome::Idle);
@@ -375,23 +407,10 @@ fn play_session(
             }
             // A LOAD replaced by the next one (sent again after an unreadable answer): nothing to do.
             ChannelMessage::Media(MediaResponse::LoadCancelled(_)) => {}
+            // load() handles the answer to its own LOAD: this one is for an older request.
+            ChannelMessage::Media(MediaResponse::LoadFailed(_)) => {}
             ChannelMessage::Media(other) => {
-                // The Sharp refused once right after sccast was restarted, and accepted the next try.
-                if matches!(other, MediaResponse::LoadFailed(_)) && reloads < MAX_RELOADS {
-                    reloads += 1;
-                    tracing::warn!(attempt = reloads, "stream refused, loading it again");
-                    std::thread::sleep(Duration::from_secs(1));
-                    media_session = load()?;
-                    continue;
-                }
                 close_app();
-                if matches!(other, MediaResponse::LoadFailed(_)) {
-                    anyhow::bail!(
-                        "{} refused the stream: it may not decode this format, \
-                         try a lower --resolution (e.g. 1280x720) or --bitrate",
-                        device.name
-                    );
-                }
                 anyhow::bail!("media error: {other:?}");
             }
             ChannelMessage::Receiver(ReceiverResponse::Status(status)) => {

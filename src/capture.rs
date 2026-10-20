@@ -155,13 +155,8 @@ impl Capture {
 
     /// Number of segments currently on disk.
     pub fn segments(&self) -> std::io::Result<usize> {
-        let mut count = 0;
-        for entry in std::fs::read_dir(self.dir())? {
-            if entry?.path().extension().is_some_and(|ext| ext == "ts") {
-                count += 1;
-            }
-        }
-        Ok(count)
+        let ts = |e: &std::fs::DirEntry| e.path().extension().is_some_and(|ext| ext == "ts");
+        Ok(std::fs::read_dir(self.dir())?.flatten().filter(ts).count())
     }
 
     /// Wait up to `timeout` for a pipeline message; fail on error or end of stream.

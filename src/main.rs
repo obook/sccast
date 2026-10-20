@@ -21,14 +21,14 @@ use tracing_subscriber::EnvFilter;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 /// Never set: outside the menu, stopping always closes the receiver app.
 static NO_KEEP: AtomicBool = AtomicBool::new(false);
-/// Set while the menu runs: logs go to log_path().
-static MENU_LOG: AtomicBool = AtomicBool::new(false);
+/// Set while the menu runs: logs go to this file, opened once.
+static MENU_LOG: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
 
 /// Menu log, on the per-user tmpfs (private, cleared at logout).
 fn log_path() -> std::path::PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into).join("sccast.log")
 }
-/// A normal launch takes 2 to 6 s, the fallback to Google's receiver included.
+/// Pause between two launch tries in the menu.
 const RETRY_DELAY: Duration = Duration::from_secs(2);
 const SEARCHING: &str = "Searching for Chromecast devices, please wait...";
 
@@ -40,9 +40,8 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("sccast=info")))
         .with_ansi(false)
         .with_writer(move || -> Box<dyn Write> {
-            if MENU_LOG.load(Ordering::Relaxed) {
-                let file = std::fs::OpenOptions::new().create(true).append(true).open(log_path());
-                file.map_or_else(|_| Box::new(std::io::sink()) as Box<dyn Write>, |f| Box::new(f))
+            if let Some(file) = MENU_LOG.get() {
+                Box::new(file)
             } else if verbose {
                 Box::new(std::io::stderr())
             } else {
@@ -57,7 +56,7 @@ fn main() -> anyhow::Result<()> {
         Command::List { timeout } => {
             let devices = spin(SEARCHING, || discovery::discover(Duration::from_secs(timeout)))?;
             if devices.is_empty() {
-                bail!("no Chromecast found (check that mDNS/UDP 5353 is not blocked)");
+                bail!("{}", discovery::NONE_FOUND);
             }
             for d in devices {
                 println!("{}\t{}\t{}:{}\t{}", d.name, d.model, d.ip, d.port, d.id);
@@ -269,8 +268,9 @@ fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // The screen first, before the menu takes the terminal.
     let screen = portal::ScreenCast::open()?;
     // A fresh log for each run.
-    let _ = std::fs::remove_file(log_path());
-    MENU_LOG.store(true, Ordering::Relaxed);
+    if let Ok(file) = std::fs::File::create(log_path()) {
+        let _ = MENU_LOG.set(file);
+    }
     let mut terminal = ratatui::init();
     let result = drive_menu(&mut terminal, &mut settings, screen, quit);
     // Not restore(): its eprintln! panics when the terminal was closed.
@@ -367,10 +367,11 @@ fn drive_menu(
     }
 }
 
-/// Wait for `thread`, at most 5 s: the TV can stop answering.
+/// Wait for `thread`, at most 15 s: the TV can stop answering. Freeing it takes several round
+/// trips (170 to 500 ms each on the school network), after a receive() that blocks up to 5 s.
 fn wait_for<T>(thread: &JoinHandle<T>) {
     let started = Instant::now();
-    while !thread.is_finished() && started.elapsed() < Duration::from_secs(5) {
+    while !thread.is_finished() && started.elapsed() < Duration::from_secs(15) {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -455,18 +456,11 @@ fn launch(
 /// Resolve `--device`, or let the user pick one from the devices found.
 fn pick_device(query: Option<&str>) -> anyhow::Result<discovery::CastDevice> {
     if let Some(query) = query {
-        let found = spin(&format!("Looking for {query}..."), || discovery::find(query, DISCOVERY_TIMEOUT))?;
-        if let Some(device) = found {
-            return Ok(device);
-        }
+        return spin(&format!("Looking for {query}..."), || discovery::find(query, DISCOVERY_TIMEOUT));
     }
     let mut devices = spin(SEARCHING, || discovery::discover(DISCOVERY_TIMEOUT))?;
     if devices.is_empty() {
-        bail!("no Chromecast found (check that mDNS/UDP 5353 is not blocked)");
-    }
-    if let Some(q) = query {
-        let names: Vec<_> = devices.iter().map(|d| d.name.as_str()).collect();
-        bail!("device {q:?} not found; available: {}", names.join(", "));
+        bail!("{}", discovery::NONE_FOUND);
     }
     for (i, d) in devices.iter().enumerate() {
         println!("{}) {} ({})", i + 1, d.name, d.model);

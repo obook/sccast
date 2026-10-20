@@ -1,7 +1,14 @@
 #!/bin/sh
-# Build the sccast .deb for one target inside an Ubuntu container.
+#
+# Name: build-deb.sh
+# Description: Build the sccast .deb for one target inside an Ubuntu container.
 # Usage: packaging/build-deb.sh neon|ubuntu26.04
 # Output: target/debian/sccast_<version>-1~<target>_amd64.deb
+# Author: O. Booklage
+# Date: October 2026
+# Licence: MIT
+#
+# POSIX sh has no pipefail; the script has no pipe.
 set -eu
 
 case "${1:-}" in

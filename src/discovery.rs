@@ -1,3 +1,11 @@
+//! discovery.rs
+//! Find Chromecast devices on the local network with mDNS (service `_googlecast._tcp`).
+//! Used by `sccast list`, by `--device` and by the menu's device list.
+//!
+//! Author: O. Booklage
+//! Date: October 2026
+//! Licence: MIT
+
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
@@ -43,17 +51,30 @@ pub fn discover(timeout: Duration) -> anyhow::Result<Vec<CastDevice>> {
 
 /// Find the device whose name (case-insensitive) or id is `query`.
 /// Returns as soon as it answers, instead of waiting for the full timeout.
-pub fn find(query: &str, timeout: Duration) -> anyhow::Result<Option<CastDevice>> {
+/// When it does not answer, the error lists the devices seen during the same browse.
+pub fn find(query: &str, timeout: Duration) -> anyhow::Result<CastDevice> {
+    let wanted = query.to_lowercase();
     let mut hit = None;
+    let mut seen = BTreeMap::new();
     browse(timeout, |device| {
-        let matches = device.name.eq_ignore_ascii_case(query) || device.id == query;
-        if matches {
+        if device.name.to_lowercase() == wanted || device.id == query {
             hit = Some(device);
+            return true;
         }
-        matches
+        seen.insert(device.id.clone(), device.name);
+        false
     })?;
-    Ok(hit)
+    if let Some(device) = hit {
+        return Ok(device);
+    }
+    if seen.is_empty() {
+        anyhow::bail!("{NONE_FOUND}");
+    }
+    let names: Vec<_> = seen.into_values().collect();
+    anyhow::bail!("device {query:?} not found; available: {}", names.join(", "))
 }
+
+pub const NONE_FOUND: &str = "no Chromecast found (check that mDNS/UDP 5353 is not blocked)";
 
 /// Call `on_device` for each resolved device until it returns true or `timeout` expires.
 pub fn browse(timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<()> {

@@ -16,11 +16,24 @@
 <div id="lag"></div>
 <div id="warn"></div>
 <script>
-// No optional chaining (?.): it gave a black screen on the Sharp TV (old engine, suspected). No ?? either.
+/*
+ * sccast receiver page, loaded by the TV from GitHub Pages (app id 8FE12008).
+ * It plays sccast's HLS stream close to live with Shaka, shows a warning top right
+ * when the network or the playback cannot keep up, and closes itself when sccast is gone.
+ *
+ * No optional chaining (?.): it gave a black screen on the Sharp TV (old engine, suspected).
+ * No ?? either.
+ *
+ * Author: O. Booklage
+ * Date: October 2026
+ * Licence: MIT
+ */
 
-// Seconds behind the newest segment. Shaka's HLS default is 3 segments (3 s for sccast).
-// sccast --latency overrides it with ?latency= on the stream URL.
-// 1 s plays smoothly on the Sharp TV (about 2 to 3 s of real delay).
+/*
+ * Seconds behind the newest segment. Shaka's HLS default is 3 segments (3 s for sccast).
+ * sccast --latency overrides it with ?latency= on the stream URL.
+ * 1 s plays smoothly on the Sharp TV (about 2 to 3 s of real delay).
+ */
 const DEFAULT_LATENCY = 1;
 // The network is too slow when the download speed is below the stream bitrate times this.
 const BANDWIDTH_MARGIN = 1.3;
@@ -86,6 +99,65 @@ const TEXT = french
 
 const lag = document.getElementById('lag');
 const warn = document.getElementById('warn');
+
+/* True once the player has buffered without a break for GIVE_UP_MS. */
+function stalledTooLong(now) {
+  if (player.getPlayerState() !== cast.framework.messages.PlayerState.BUFFERING) {
+    stalledSince = 0;
+    return false;
+  }
+  if (!stalledSince) {
+    stalledSince = now;
+  }
+  return now - stalledSince > GIVE_UP_MS;
+}
+
+/* Shaka's measures, or nothing before the first load. */
+function readStats() {
+  try {
+    return player.getStats() || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/* Network warning first: it tells what to do. Returns the download speed in bit/s. */
+function showWarning(stats) {
+  const needed = videoBps ? videoBps + AUDIO_BPS : stats.streamBandwidth;
+  const received = stats.estimatedBandwidth;
+  const slowNetwork = Boolean(received && needed && received < needed * BANDWIDTH_MARGIN);
+  const stutters = buffering.length > MAX_BUFFERING_PER_MINUTE;
+  if (slowNetwork) {
+    warn.textContent = TEXT.network;
+  } else if (stutters) {
+    warn.textContent = TEXT.stutter;
+  }
+  if (slowNetwork || stutters) {
+    warn.style.display = 'block';
+  } else {
+    warn.style.display = 'none';
+  }
+  return received;
+}
+
+/* Debug builds only: delay behind live, download speed and buffering count, bottom right. */
+function showDebug(received) {
+  if (!debug) {
+    lag.textContent = '';
+    return;
+  }
+  const range = player.getLiveSeekableRange();
+  let behind = '';
+  if (range && range.end) {
+    behind = `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live`;
+  }
+  let speed = '';
+  if (received) {
+    speed = `, ${(received / 1e6).toFixed(1)} Mbit/s received`;
+  }
+  lag.textContent = `${behind}${speed}, ${buffering.length} buffering/min`;
+}
+
 setInterval(() => {
   // Nothing plays (stopped by sccast, or ended): no warning, and a fresh count for the next cast.
   if (player.getPlayerState() === cast.framework.messages.PlayerState.IDLE) {
@@ -95,41 +167,14 @@ setInterval(() => {
     return;
   }
   const now = Date.now();
-  if (player.getPlayerState() !== cast.framework.messages.PlayerState.BUFFERING) {
-    stalledSince = 0;
-  } else if (!stalledSince) {
-    stalledSince = now;
-  } else if (now - stalledSince > GIVE_UP_MS) {
+  if (stalledTooLong(now)) {
     context.stop();
     return;
   }
   while (buffering.length && now - buffering[0] > 60000) {
     buffering.shift();
   }
-  let stats = {};
-  try {
-    stats = player.getStats() || {};
-  } catch (e) {
-    // No stats before the first load.
-  }
-  const needed = videoBps ? videoBps + AUDIO_BPS : stats.streamBandwidth;
-  const received = stats.estimatedBandwidth;
-  const slowNetwork = Boolean(received && needed && received < needed * BANDWIDTH_MARGIN);
-  if (slowNetwork) {
-    warn.textContent = TEXT.network;
-  } else if (buffering.length > MAX_BUFFERING_PER_MINUTE) {
-    warn.textContent = TEXT.stutter;
-  }
-  warn.style.display = slowNetwork || buffering.length > MAX_BUFFERING_PER_MINUTE ? 'block' : 'none';
-
-  if (!debug) {
-    lag.textContent = '';
-    return;
-  }
-  const range = player.getLiveSeekableRange();
-  const behind = range && range.end ? `${(range.end - player.getCurrentTimeSec()).toFixed(1)} s behind live` : '';
-  const speed = received ? `, ${(received / 1e6).toFixed(1)} Mbit/s received` : '';
-  lag.textContent = `${behind}${speed}, ${buffering.length} buffering/min`;
+  showDebug(showWarning(readStats()));
 }, 1000);
 
 context.start(options);

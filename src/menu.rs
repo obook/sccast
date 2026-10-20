@@ -305,9 +305,8 @@ impl Menu {
     }
 
     /// Redraw before a blocking step (portal dialog, stopping).
-    pub fn draw_now(&mut self, terminal: &mut DefaultTerminal, s: &Settings) -> anyhow::Result<()> {
-        terminal.draw(|f| self.draw(f, s))?;
-        Ok(())
+    pub fn draw_now(&mut self, terminal: &mut DefaultTerminal, s: &Settings) -> std::io::Result<()> {
+        terminal.draw(|f| self.draw(f, s)).map(drop)
     }
 
     /// Browse in a thread; devices show up as they answer.
@@ -316,6 +315,8 @@ impl Menu {
             return;
         }
         self.scanning = true;
+        // Devices gone since the last scan (unplugged, new address) must not stay listed.
+        self.devices.clear();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             // Stop early once the menu is gone (send fails).
@@ -511,9 +512,7 @@ impl Menu {
         let author = Line::from(Span::styled(" (C) Olivier Booklage ", Style::new().fg(Color::Gray))).right_aligned();
         f.render_widget(Paragraph::new(Line::from(help)).block(rounded(false).title_bottom(author)), footer);
     }
-}
 
-impl Menu {
     fn draw_live(&self, f: &mut Frame, area: ratatui::layout::Rect) {
         let live = &self.live;
         let [text_area, chart_area] =
