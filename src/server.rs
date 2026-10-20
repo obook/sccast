@@ -37,10 +37,14 @@ pub fn serve_file(file: &Path, port: u16, stop: &'static AtomicBool) -> anyhow::
     spawn(Router::new().route_service("/media", ServeFile::new(file)), port, stop)
 }
 
+/// Clear the segment measures: those of a previous cast would hide a slow start.
+pub fn forget_fetches() {
+    FETCHES.lock().unwrap().clear();
+}
+
 /// Serve the HLS directory `dir` at the root on `port`.
 pub fn serve_hls(dir: &Path, port: u16, stop: &'static AtomicBool) -> anyhow::Result<JoinHandle<()>> {
-    // Measures of a previous cast would hide a slow start.
-    FETCHES.lock().unwrap().clear();
+    forget_fetches();
     let app = Router::new()
         .fallback_service(ServeDir::new(dir))
         .layer(middleware::from_fn(hls_headers));

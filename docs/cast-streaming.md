@@ -41,6 +41,8 @@ only reads files.
 
 - Other devices (Chromecast, Nest Hub).
 - Menu tests: Enter, `s`, `q`, closing the terminal.
-- Reconnection when the TV drops the session.
+- Reconnection when the TV drops the session, and launch retries in the menu.
+- The OFFER goes to the broadcast address `*` (rust_cast has no other way):
+  checked on the Sharp only.
 - Lip sync measure (the user saw maybe a slight offset).
 - Tuning: target delay fixed at 100 ms, bitrate steps are guesses.
