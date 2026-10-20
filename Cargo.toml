@@ -1,0 +1,23 @@
+[package]
+name = "screencast-cc"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "sccast"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+clap = { version = "4.6.7", features = ["derive"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
+gstreamer = "0.25.4"
+mdns-sd = "0.21.5"
+rust_cast = "0.21.0"
+tempfile = "3.27.0"
+tokio = { version = "1.54.0", features = ["rt", "net"] }
+tower-http = { version = "0.7.1", features = ["fs", "cors", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
