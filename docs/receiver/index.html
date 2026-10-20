@@ -28,6 +28,8 @@ const BANDWIDTH_MARGIN = 1.3;
 const MAX_BUFFERING_PER_MINUTE = 2;
 // Sound bitrate set by sccast, added to the video bitrate.
 const AUDIO_BPS = 128000;
+// The player buffers several times while it starts: not a stutter.
+const STARTUP_MS = 15000;
 
 const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
@@ -35,8 +37,11 @@ const player = context.getPlayerManager();
 let debug = false;
 // Video bitrate in bit/s, from ?kbps= on the stream URL (0 if absent).
 let videoBps = 0;
+// Time of the last LOAD.
+let loadedAt = 0;
 
 player.setMediaPlaybackInfoHandler((request, config) => {
+  loadedAt = Date.now();
   const url = new URL(request.media.contentId);
   debug = url.searchParams.has('debug');
   videoBps = (Number(url.searchParams.get('kbps')) || 0) * 1000;
@@ -58,7 +63,7 @@ const buffering = [];
 // Guarded: an error here would stop the page before context.start (black screen).
 try {
   player.addEventListener(cast.framework.events.EventType.BUFFERING, (event) => {
-    if (event.isBuffering) {
+    if (event.isBuffering && Date.now() - loadedAt > STARTUP_MS) {
       buffering.push(Date.now());
     }
   });
