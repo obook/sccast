@@ -11,7 +11,10 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Sparkline};
+use ratatui::layout::Margin;
+use ratatui::widgets::{
+    Block, BorderType, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Sparkline,
+};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::cast::{DEFAULT_MEDIA_RECEIVER, SCCAST_RECEIVER};
@@ -373,6 +376,11 @@ impl Menu {
                 KeyCode::Down | KeyCode::Char('j') if count > 0 => {
                     state.select(Some((state.selected().unwrap_or(0) + 1) % count));
                 }
+                // Long device lists (a school network): jump by pages or to the ends.
+                KeyCode::PageDown if count > 0 => state.select(Some((state.selected().unwrap_or(0) + 10).min(count - 1))),
+                KeyCode::PageUp => state.select(Some(state.selected().unwrap_or(0).saturating_sub(10))),
+                KeyCode::Home => state.select(Some(0)),
+                KeyCode::End if count > 0 => state.select(Some(count - 1)),
                 KeyCode::Tab | KeyCode::BackTab => self.on_settings = !self.on_settings,
                 KeyCode::Left | KeyCode::Char('h') if self.on_settings => change(s, self.row.selected().unwrap_or(0), -1),
                 KeyCode::Right | KeyCode::Char('l') if self.on_settings => change(s, self.row.selected().unwrap_or(0), 1),
@@ -450,11 +458,23 @@ impl Menu {
         } else if items.is_empty() {
             items.push(ListItem::new(Span::styled("No device found. r: search again", Style::new().fg(Color::Yellow))));
         }
+        let count = items.len();
+        let title = match self.devices.len() {
+            0 => " Devices ".to_string(),
+            n => format!(" Devices ({n}) "),
+        };
         let devices = List::new(items)
-            .block(rounded(!self.on_settings).title(" Devices "))
+            .block(rounded(!self.on_settings).title(title))
             .highlight_symbol("▶ ")
             .highlight_style(highlight(!self.on_settings));
         f.render_stateful_widget(devices, left, &mut self.device);
+        // A school can show dozens of devices: show that the list scrolls.
+        let visible = left.height.saturating_sub(2) as usize;
+        if count > visible {
+            let mut bar = ScrollbarState::new(count - visible).position(self.device.offset());
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight).begin_symbol(None).end_symbol(None);
+            f.render_stateful_widget(scrollbar, left.inner(Margin { vertical: 1, horizontal: 0 }), &mut bar);
+        }
 
         // Settings.
         let items: Vec<ListItem> = ROWS
@@ -652,6 +672,35 @@ mod tests {
         assert!(live.alert().unwrap().0.starts_with("PC too slow"));
         live.round_trip = Some(None);
         assert!(live.alert().unwrap().0.contains("does not answer"));
+    }
+
+    #[test]
+    fn long_device_list_scrolls() {
+        let mut menu = Menu::idle();
+        for i in 0..30 {
+            let id = format!("d{i:02}");
+            let device = CastDevice {
+                id: id.clone(),
+                name: format!("Room {i:02}"),
+                model: "Chromecast".into(),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+                port: 8009,
+            };
+            menu.devices.insert(id, device);
+        }
+        menu.device.select(Some(25));
+        let s = Settings {
+            stream: Stream { resolution: (1920, 1080), fps: 30, bitrate: 2500, port: 8090, no_audio: false, format: Format::Hls },
+            audio_delay: 0,
+            latency: None,
+            receiver: SCCAST_RECEIVER.into(),
+        };
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20)).unwrap();
+        terminal.draw(|f| menu.draw(f, &s)).unwrap();
+        let screen: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        assert!(screen.contains("Devices (30)"));
+        // The selected device is scrolled into view, and the scrollbar thumb is drawn.
+        assert!(screen.contains("Room 25") && screen.contains('█'));
     }
 
     #[test]
