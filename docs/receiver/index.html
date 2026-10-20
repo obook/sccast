@@ -48,9 +48,16 @@ options.useShakaForHls = true;
 options.shakaVersion = '4.15.56';
 
 // No documented getter for the player's <video>: try the known places.
+// No optional chaining (?.): the page using it gave a black screen on the Sharp TV (old engine, suspected).
 function video() {
   const cmp = document.querySelector('cast-media-player');
-  return cmp?.getMediaElement?.() || cmp?.shadowRoot?.querySelector('video') || document.querySelector('video');
+  if (cmp && typeof cmp.getMediaElement === 'function' && cmp.getMediaElement()) {
+    return cmp.getMediaElement();
+  }
+  if (cmp && cmp.shadowRoot && cmp.shadowRoot.querySelector('video')) {
+    return cmp.shadowRoot.querySelector('video');
+  }
+  return document.querySelector('video');
 }
 
 const lag = document.getElementById('lag');
