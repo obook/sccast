@@ -32,6 +32,9 @@ pub enum Command {
         /// Cast the screen without sound.
         #[arg(long)]
         no_audio: bool,
+        /// Delay the sound by this many milliseconds, if it comes before the image on the TV.
+        #[arg(long, default_value_t = 0)]
+        audio_delay: u64,
     },
     /// Close the media receiver left running on a device.
     Stop {

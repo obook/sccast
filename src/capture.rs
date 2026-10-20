@@ -42,7 +42,8 @@ pub struct Hls {
 
 impl Hls {
     /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
-    pub fn start(screen: Option<ScreenCast>, audio: bool) -> anyhow::Result<Self> {
+    /// `audio` is None for no sound, or the delay to add to the sound to line it up with the image.
+    pub fn start(screen: Option<ScreenCast>, audio: Option<Duration>) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
@@ -53,18 +54,23 @@ impl Hls {
             // `path` takes the node id; `target-object` wants the node serial, which the portal does not give.
             // PipeWire only sends frames on screen damage: keepalive resends the last one so a still
             // screen keeps producing segments, and videorate turns it into a constant 30 fps.
+            // Frames are stamped when pipewiresrc hands them out: the queue gives the encoding
+            // its own thread, so a slow frame no longer holds the next ones in PipeWire (late
+            // stamps put the sound ahead of the image). Leaky: drop frames rather than lag.
             Some(screen) => format!(
-                "pipewiresrc name=src fd={} path={} keepalive-time=100 ! videorate",
+                "pipewiresrc name=src fd={} path={} keepalive-time=100 \
+                 ! queue leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 \
+                 ! videorate",
                 screen.fd(),
                 screen.node_id
             ),
         };
         let mut description = format!("{source} ! videoconvert ! videoscale ! {RAW_CAPS} ! {ENCODE}");
-        if audio {
+        if audio.is_some() {
             let audio_source = match &screen {
-                None => "audiotestsrc is-live=true wave=ticks volume=0.3",
+                None => "audiotestsrc name=asrc is-live=true wave=ticks volume=0.3",
                 // Monitor of the default output: what the PC is playing. Works with pipewire-pulse.
-                Some(_) => "pulsesrc device=@DEFAULT_MONITOR@",
+                Some(_) => "pulsesrc name=asrc device=@DEFAULT_MONITOR@",
             };
             description.push_str(&format!(" {audio_source} ! {AUDIO_ENCODE}"));
         }
@@ -74,6 +80,10 @@ impl Hls {
         let bin = pipeline.downcast_ref::<gst::Bin>().context("pipeline is not a bin")?;
         if let Some(src) = bin.by_name("src") {
             restamp_on_arrival(&src, &pipeline)?;
+        }
+        if let (Some(delay), Some(asrc)) = (audio, bin.by_name("asrc")) {
+            let pad = asrc.static_pad("src").context("audio source has no src pad")?;
+            pad.set_offset(delay.as_nanos() as i64);
         }
         let sink = bin.by_name("sink").context("hlssink2 not found in pipeline")?;
         sink.set_property("location", path_str(&dir.path().join("seg%05d.ts"))?);

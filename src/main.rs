@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Cast { device, url, file, no_audio } => {
+        Command::Cast { device, url, file, no_audio, audio_delay } => {
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
@@ -53,7 +53,8 @@ fn main() -> anyhow::Result<()> {
                 return cast::play_url(&device, &format!("http://{ip}:{HTTP_PORT}/media"), "video/mp4", false, stop);
             }
 
-            let hls = capture::Hls::start(Some(portal::ScreenCast::open()?), !no_audio)?;
+            let audio = (!no_audio).then(|| Duration::from_millis(audio_delay));
+            let hls = capture::Hls::start(Some(portal::ScreenCast::open()?), audio)?;
             server::serve_hls(hls.dir(), HTTP_PORT)?;
             while hls.segments()? < capture::MIN_SEGMENTS {
                 if stop.load(Ordering::SeqCst) {
@@ -76,7 +77,7 @@ fn main() -> anyhow::Result<()> {
         Command::Serve { test_pattern, no_audio } => {
             let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };
             let stop = stop_flag()?;
-            let hls = capture::Hls::start(screen, !no_audio)?;
+            let hls = capture::Hls::start(screen, (!no_audio).then_some(Duration::ZERO))?;
             server::serve_hls(hls.dir(), HTTP_PORT)?;
             println!("http://localhost:{HTTP_PORT}/{}", capture::PLAYLIST);
             while !stop.load(Ordering::SeqCst) {
