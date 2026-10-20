@@ -55,6 +55,8 @@ pub fn play_url(device: &Device, url: &str, content_type: &str, stop: &AtomicBoo
                     tracing::info!(state = ?entry.player_state, time = ?entry.current_time, "media");
                     if matches!(entry.player_state, PlayerState::Idle) && entry.idle_reason.is_some() {
                         tracing::info!(reason = ?entry.idle_reason, "playback ended");
+                        // Otherwise the TV stays on the Cast splash screen.
+                        cast.receiver.stop_app(app.session_id.clone())?;
                         return Ok(());
                     }
                 }
