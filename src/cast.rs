@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
-use rust_cast::channels::media::{Media, MediaResponse, PlayerState, StreamType};
+use rust_cast::channels::media::{IdleReason, Media, MediaResponse, PlayerState, StreamType};
 use rust_cast::channels::receiver::{CastDeviceApp, ReceiverResponse};
 use rust_cast::{CastDevice, ChannelMessage};
 
@@ -11,6 +11,8 @@ use crate::discovery::CastDevice as Device;
 
 const RECEIVER: &str = "receiver-0";
 const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
+// ponytail: counted over the whole cast, not per hour; reset it if long casts hit the cap.
+const MAX_RELOADS: u32 = 3;
 
 fn connect(device: &Device) -> anyhow::Result<CastDevice<'static>> {
     // Chromecasts use self-signed certificates.
@@ -83,13 +85,18 @@ pub fn play_url(
         metadata: None,
         duration: None,
     };
-    let loaded = cast.media.load(app.transport_id.clone(), app.session_id.clone(), &media)?;
-    let media_session = loaded
-        .entries
-        .first()
-        .map(|e| e.media_session_id)
-        .context("LOAD returned no media session")?;
-    tracing::info!(%url, media_session, "media loaded");
+    let load = || -> anyhow::Result<i32> {
+        let loaded = cast.media.load(app.transport_id.clone(), app.session_id.clone(), &media)?;
+        let media_session = loaded
+            .entries
+            .first()
+            .map(|e| e.media_session_id)
+            .context("LOAD returned no media session")?;
+        tracing::info!(%url, media_session, "media loaded");
+        Ok(media_session)
+    };
+    let mut media_session = load()?;
+    let mut reloads = 0;
 
     let close_app = || {
         if let Err(e) = cast.receiver.stop_app(app.session_id.clone()) {
@@ -115,10 +122,20 @@ pub fn play_url(
             ChannelMessage::Heartbeat(HeartbeatResponse::Ping) => cast.heartbeat.pong()?,
             ChannelMessage::Media(MediaResponse::Status(status)) => {
                 // Skip statuses of the media we replaced (e.g. its IDLE/INTERRUPTED).
-                for entry in status.entries.into_iter().filter(|e| e.media_session_id == media_session) {
+                let current = media_session;
+                for entry in status.entries.into_iter().filter(|e| e.media_session_id == current) {
                     tracing::info!(state = ?entry.player_state, time = ?entry.current_time, "media");
                     if matches!(entry.player_state, PlayerState::Idle) && entry.idle_reason.is_some() {
                         tracing::info!(reason = ?entry.idle_reason, "playback ended");
+                        // A live stream has no end: the player gave up, so load it again.
+                        // Cancelled (TV remote) and Interrupted (another sender) are left alone.
+                        let gave_up = matches!(entry.idle_reason, Some(IdleReason::Error | IdleReason::Finished));
+                        if live && gave_up && reloads < MAX_RELOADS {
+                            reloads += 1;
+                            tracing::warn!(attempt = reloads, "reloading the stream");
+                            media_session = load()?;
+                            break;
+                        }
                         // Otherwise the TV stays on the Cast splash screen.
                         close_app();
                         return Ok(());
@@ -127,6 +144,13 @@ pub fn play_url(
             }
             ChannelMessage::Media(other) => {
                 close_app();
+                if matches!(other, MediaResponse::LoadFailed(_)) {
+                    anyhow::bail!(
+                        "{} refused the stream: it may not decode this format, \
+                         try a lower --resolution (e.g. 1280x720) or --bitrate",
+                        device.name
+                    );
+                }
                 anyhow::bail!("media error: {other:?}");
             }
             ChannelMessage::Receiver(ReceiverResponse::Status(status)) => {

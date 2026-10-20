@@ -5,6 +5,7 @@ mod discovery;
 mod portal;
 mod server;
 
+use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -14,8 +15,7 @@ use cli::{Cli, Command};
 use tracing_subscriber::EnvFilter;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
-// Fixed so a firewall rule can target it; becomes --port in J8.
-const HTTP_PORT: u16 = 8090;
+const SEARCHING: &str = "Searching for Chromecast devices, please wait...";
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
 
     match Cli::parse().command {
         Command::List { timeout } => {
-            let devices = discovery::discover(Duration::from_secs(timeout))?;
+            let devices = spin(SEARCHING, || discovery::discover(Duration::from_secs(timeout)))?;
             if devices.is_empty() {
                 bail!("no Chromecast found (check that mDNS/UDP 5353 is not blocked)");
             }
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Cast { device, url, file, no_audio, audio_delay } => {
+        Command::Cast { device, url, file, audio_delay, stream } => {
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
@@ -44,28 +44,35 @@ fn main() -> anyhow::Result<()> {
             tracing::info!(name = %device.name, ip = %device.ip, "casting");
             let stop = stop_flag()?;
             let ip = server::lan_ip(device.ip.into())?;
+            let port = stream.port;
 
             if let Some(url) = url {
                 return cast::play_url(&device, &url, "video/mp4", false, stop);
             }
             if let Some(file) = file {
-                server::serve_file(&file, HTTP_PORT)?;
-                return cast::play_url(&device, &format!("http://{ip}:{HTTP_PORT}/media"), "video/mp4", false, stop);
+                server::serve_file(&file, port)?;
+                return cast::play_url(&device, &format!("http://{ip}:{port}/media"), "video/mp4", false, stop);
             }
 
-            let audio = (!no_audio).then(|| Duration::from_millis(audio_delay));
-            let hls = capture::Hls::start(Some(portal::ScreenCast::open()?), audio)?;
-            server::serve_hls(hls.dir(), HTTP_PORT)?;
-            while hls.segments()? < capture::MIN_SEGMENTS {
-                if stop.load(Ordering::SeqCst) {
-                    return Ok(());
+            let screen = portal::ScreenCast::open()?;
+            let hls = capture::Hls::start(Some(screen), &stream, Duration::from_millis(audio_delay))?;
+            server::serve_hls(hls.dir(), port)?;
+            spin("Preparing the stream...", || -> anyhow::Result<()> {
+                while hls.segments()? < capture::MIN_SEGMENTS && !stop.load(Ordering::SeqCst) {
+                    hls.poll(Duration::from_millis(100))?;
                 }
-                hls.poll(Duration::from_millis(100))?;
+                Ok(())
+            })?;
+            if stop.load(Ordering::SeqCst) {
+                return Ok(());
             }
-            // ponytail: pipeline errors are not watched while casting; poll the bus
-            // from a thread if a capture failure ever leaves the TV frozen.
-            let url = format!("http://{ip}:{HTTP_PORT}/{}", capture::PLAYLIST);
-            cast::play_url(&device, &url, "application/x-mpegURL", true, stop)
+            let capture = hls.watch(stop)?;
+            let url = format!("http://{ip}:{port}/{}", capture::PLAYLIST);
+            let played = cast::play_url(&device, &url, "application/x-mpegURL", true, stop);
+            stop.store(true, Ordering::SeqCst);
+            // A capture failure explains why the cast stopped: report it first.
+            capture.join().expect("capture watcher panicked")?;
+            played
         }
         Command::Stop { device } => {
             let device = pick_device(device.as_deref())?;
@@ -74,12 +81,12 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Serve { test_pattern, no_audio } => {
+        Command::Serve { test_pattern, stream } => {
             let screen = if test_pattern { None } else { Some(portal::ScreenCast::open()?) };
             let stop = stop_flag()?;
-            let hls = capture::Hls::start(screen, (!no_audio).then_some(Duration::ZERO))?;
-            server::serve_hls(hls.dir(), HTTP_PORT)?;
-            println!("http://localhost:{HTTP_PORT}/{}", capture::PLAYLIST);
+            let hls = capture::Hls::start(screen, &stream, Duration::ZERO)?;
+            server::serve_hls(hls.dir(), stream.port)?;
+            println!("http://localhost:{}/{}", stream.port, capture::PLAYLIST);
             while !stop.load(Ordering::SeqCst) {
                 hls.poll(Duration::from_millis(200))?;
             }
@@ -96,19 +103,55 @@ fn stop_flag() -> anyhow::Result<&'static AtomicBool> {
     Ok(&STOP)
 }
 
-/// Resolve `--device`, or fail with the list of devices to choose from.
+/// Run `f` while an animated `message` turns on stderr. Plain run when stderr is not a terminal.
+fn spin<T>(message: &str, f: impl FnOnce() -> T) -> T {
+    if !std::io::stderr().is_terminal() {
+        return f();
+    }
+    let done = AtomicBool::new(false);
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            for frame in ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"].iter().cycle() {
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                eprint!("\r{frame} {message}");
+                std::thread::sleep(Duration::from_millis(120));
+            }
+            // Erase the line so the next output starts clean.
+            eprint!("\r\x1b[2K");
+        });
+        let result = f();
+        done.store(true, Ordering::Relaxed);
+        result
+    })
+}
+
+/// Resolve `--device`, or let the user pick one from the devices found.
 fn pick_device(query: Option<&str>) -> anyhow::Result<discovery::CastDevice> {
     if let Some(query) = query {
-        if let Some(device) = discovery::find(query, DISCOVERY_TIMEOUT)? {
+        let found = spin(&format!("Looking for {query}..."), || discovery::find(query, DISCOVERY_TIMEOUT))?;
+        if let Some(device) = found {
             return Ok(device);
         }
     }
-    let names: Vec<_> = discovery::discover(DISCOVERY_TIMEOUT)?
-        .into_iter()
-        .map(|d| d.name)
-        .collect();
-    match query {
-        Some(q) => bail!("device {q:?} not found; available: {}", names.join(", ")),
-        None => bail!("no --device given; available: {}", names.join(", ")),
+    let mut devices = spin(SEARCHING, || discovery::discover(DISCOVERY_TIMEOUT))?;
+    if devices.is_empty() {
+        bail!("no Chromecast found (check that mDNS/UDP 5353 is not blocked)");
+    }
+    if let Some(q) = query {
+        let names: Vec<_> = devices.iter().map(|d| d.name.as_str()).collect();
+        bail!("device {q:?} not found; available: {}", names.join(", "));
+    }
+    for (i, d) in devices.iter().enumerate() {
+        println!("{}) {} ({})", i + 1, d.name, d.model);
+    }
+    print!("Device number: ");
+    std::io::stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    match answer.trim().parse::<usize>() {
+        Ok(n) if (1..=devices.len()).contains(&n) => Ok(devices.swap_remove(n - 1)),
+        _ => bail!("no device chosen"),
     }
 }
