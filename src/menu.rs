@@ -624,7 +624,7 @@ fn change(s: &mut Settings, row: usize, dir: isize) {
         5 => st.no_audio = !st.no_audio,
         6 => s.audio_delay = cycle(&AUDIO_DELAYS, s.audio_delay, dir),
         7 => s.receiver = cycle(&[SCCAST_RECEIVER, DEFAULT_MEDIA_RECEIVER], s.receiver.as_str(), dir).to_string(),
-        _ => st.format = if st.format == Format::Hls { Format::Mkv } else { Format::Hls },
+        _ => st.format = cycle(&[Format::Hls, Format::Mkv, Format::Mirror], st.format, dir),
     }
 }
 
@@ -643,7 +643,12 @@ fn value(s: &Settings, row: usize) -> String {
             DEFAULT_MEDIA_RECEIVER => "Google".to_string(),
             other => other.to_string(),
         },
-        _ => if st.format == Format::Hls { "HLS" } else { "Matroska" }.to_string(),
+        _ => match st.format {
+            Format::Hls => "HLS",
+            Format::Mkv => "Matroska",
+            Format::Mirror => "Mirror",
+        }
+        .to_string(),
     }
 }
 
