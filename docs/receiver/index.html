@@ -15,7 +15,8 @@
 <script>
 // Seconds behind the newest segment. Shaka's HLS default is 3 segments (3 s for sccast).
 // sccast --latency overrides it with ?latency= on the stream URL.
-const DEFAULT_LATENCY = 2.5;
+// 1 s plays smoothly on the Sharp TV (about 2 to 3 s of real delay).
+const DEFAULT_LATENCY = 1;
 
 const context = cast.framework.CastReceiverContext.getInstance();
 const player = context.getPlayerManager();
