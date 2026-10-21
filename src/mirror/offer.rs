@@ -25,8 +25,8 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 /// RTP extension that lets the sender change the playout delay during the session.
 const ADAPTIVE_DELAY: &str = "adaptive_playout_delay";
 
-/// OFFER for the video stream, and the audio one unless `audio` is None.
-pub fn offer(stream: &Stream, video: &Keys, audio: Option<&Keys>) -> Value {
+/// OFFER number `seq` for the video stream, and the audio one unless `audio` is None.
+pub fn offer(stream: &Stream, seq: u32, video: &Keys, audio: Option<&Keys>) -> Value {
     let (width, height) = stream.resolution;
     let mut streams = vec![json!({
         "index": 0, "type": "video_source", "codecName": "h264", "rtpProfile": "cast",
@@ -44,7 +44,7 @@ pub fn offer(stream: &Stream, video: &Keys, audio: Option<&Keys>) -> Value {
             "rtpExtensions": [ADAPTIVE_DELAY],
         }));
     }
-    json!({"type": "OFFER", "seqNum": 1, "offer": {"castMode": "mirroring", "supportedStreams": streams}})
+    json!({"type": "OFFER", "seqNum": seq, "offer": {"castMode": "mirroring", "supportedStreams": streams}})
 }
 
 /// What the receiver accepted.
@@ -58,9 +58,11 @@ pub struct Answer {
     pub adaptive: bool,
 }
 
+/// A refusal (`result` not "ok") reads as no stream accepted: the caller tries a smaller video.
 fn parse_answer(answer: &Value) -> anyhow::Result<Answer> {
     if answer["result"] != "ok" {
-        bail!("the TV refused the stream: {}", answer["error"]);
+        tracing::info!(error = %answer["error"], "the TV refused the OFFER");
+        return Ok(Answer { port: 0, video: false, audio: false, adaptive: false });
     }
     let body = &answer["answer"];
     let port = body["udpPort"].as_u64().and_then(|p| u16::try_from(p).ok()).context("ANSWER without udpPort")?;
@@ -94,6 +96,8 @@ pub fn wait_answer(cast: &CastDevice<'static>, stop: &AtomicBool) -> anyhow::Res
                 // Like rust_cast's own parse errors: skip what cannot be read.
                 let Ok(value) = serde_json::from_str::<Value>(&text) else { continue };
                 if value["type"] == "ANSWER" {
+                    // Whole: it may hold limits (constraints, display) worth using later.
+                    tracing::info!(answer = %text, "ANSWER");
                     return parse_answer(&value).map(Some);
                 }
             }
@@ -118,7 +122,8 @@ mod tests {
             no_audio: false,
             format: crate::cli::Format::Mirror,
         };
-        let offer = offer(&stream, &keys, Some(&keys));
+        let offer = offer(&stream, 2, &keys, Some(&keys));
+        assert_eq!(offer["seqNum"], 2);
         let streams = offer["offer"]["supportedStreams"].as_array().unwrap();
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0]["codecName"], "h264");
@@ -139,6 +144,7 @@ mod tests {
         let video_only = json!({"result": "ok", "answer": {"udpPort": 1, "sendIndexes": [0, 1],
             "rtpExtensions": [[ADAPTIVE_DELAY], []]}});
         assert!(!parse_answer(&video_only).unwrap().adaptive);
-        assert!(parse_answer(&json!({"result": "error", "error": {"code": 2}})).is_err());
+        let refused = parse_answer(&json!({"result": "error", "error": {"code": 2}})).unwrap();
+        assert!(!refused.video && !refused.audio);
     }
 }

@@ -61,6 +61,8 @@ pub enum Status {
     Dropped(Arc<AtomicU64>),
     /// Time to connect to the TV's Cast port, None if it did not answer.
     RoundTrip(Option<Duration>),
+    /// The cast went down to this resolution (the TV refused the one set).
+    Resolution((u32, u32)),
 }
 
 pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
@@ -135,6 +137,8 @@ impl Menu {
             Status::Served(counter) => self.live.served = Some((counter, None)),
             Status::Dropped(counter) => self.live.dropped = Some(counter),
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
+            // Handled in next(), which holds the settings.
+            Status::Resolution(_) => {}
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
@@ -197,6 +201,11 @@ impl Menu {
                 }
             }
             while let Ok(status) = self.status_rx.try_recv() {
+                // Show the resolution the TV gets; the next cast starts from it.
+                if let Status::Resolution(size) = status {
+                    s.stream.resolution = size;
+                    continue;
+                }
                 self.set_status(status);
             }
             if self.live.started.is_some() {

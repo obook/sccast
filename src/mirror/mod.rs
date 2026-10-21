@@ -51,6 +51,8 @@ const H264_PAYLOAD: u8 = 101;
 const OPUS_PAYLOAD: u8 = 96;
 const AUDIO_BITRATE: u32 = 128_000;
 const REPORT_INTERVAL: Duration = Duration::from_millis(100);
+/// Offered again when the receiver refuses the video: a Nest Hub refuses 1080p and takes 720p.
+const SMALLER_VIDEO: (u32, u32) = (1280, 720);
 /// The receiver repeats its key frame request in each report until one arrives.
 const KEY_FRAME_SPACING: Duration = Duration::from_secs(1);
 /// No RTCP from the TV for this long: the session is lost. Longer before the first report,
@@ -217,21 +219,34 @@ fn stream(
     let cast = receiver.channel();
     let video_keys = Keys::random()?;
     let audio_keys = if s.stream.no_audio { None } else { Some(Keys::random()?) };
-    if let Err(e) = cast.receiver.broadcast_message(NAMESPACE, &offer(&s.stream, &video_keys, audio_keys.as_ref())) {
-        return Ok(Outcome::Lost(format!("{e:#}")));
-    }
-    let answer = match out.step("Waiting for the TV's answer...", || wait_answer(cast, ended)) {
-        Ok(Some(answer)) => answer,
-        // Stopped by the user meanwhile.
-        Ok(None) => return Ok(Outcome::Ended),
-        Err(e) => return Ok(Outcome::Lost(format!("{e:#}"))),
-    };
-    tracing::info!(?answer, "mirroring accepted");
-    if !answer.video {
-        bail!("{} refused the H.264 video: try a lower resolution", device.name);
-    }
-    // The capture starts once the TV is ready: frames would pile up before.
     let mut settings = s.stream.clone();
+    let mut seq = 1;
+    let answer = loop {
+        let offered = offer(&settings, seq, &video_keys, audio_keys.as_ref());
+        if let Err(e) = cast.receiver.broadcast_message(NAMESPACE, &offered) {
+            return Ok(Outcome::Lost(format!("{e:#}")));
+        }
+        let answer = match out.step("Waiting for the TV's answer...", || wait_answer(cast, ended)) {
+            Ok(Some(answer)) => answer,
+            // Stopped by the user meanwhile.
+            Ok(None) => return Ok(Outcome::Ended),
+            Err(e) => return Ok(Outcome::Lost(format!("{e:#}"))),
+        };
+        tracing::info!(?answer, "mirroring answer");
+        if answer.video {
+            break answer;
+        }
+        // A refusal is not a lost session: no reconnection, it would be refused again.
+        let (width, height) = settings.resolution;
+        if height <= SMALLER_VIDEO.1 {
+            bail!("{} refused the H.264 video at {width}x{height}", device.name);
+        }
+        out.say(&format!("{} refused {width}x{height}: trying 1280x720...", device.name));
+        settings.resolution = SMALLER_VIDEO;
+        out.send(menu::Status::Resolution(SMALLER_VIDEO));
+        seq += 1;
+    };
+    // The capture starts once the TV is ready: frames would pile up before.
     settings.no_audio = !answer.audio;
     let capture = Capture::start(Some(screen), &settings, Duration::from_millis(s.audio_delay))?;
     let pipeline = capture.pipeline();

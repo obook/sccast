@@ -13,6 +13,8 @@ error.
 
 - sccast launches Google's mirroring receiver (`0F5096E8`) and sends an OFFER
   on `urn:x-cast:com.google.cast.webrtc`. The TV answers with a UDP port.
+  If it refuses the video, sccast sends a second OFFER at 1280x720 (a Nest
+  Hub refuses 1080p), then gives up. The whole ANSWER goes to the log.
 - No sender check: any program can do it, not only Chrome.
 - H.264 and Opus frames are encrypted (AES-128-CTR) and sent over RTP.
 - A Sender Report every 100 ms lets the TV time the frames.

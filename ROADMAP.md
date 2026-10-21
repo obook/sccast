@@ -19,7 +19,7 @@ Done:
 
 To do:
 
-- [ ] Test on the school Chromecast and on a Nest Hub (one accepted a 5 s session)
+- [ ] Test on the school Chromecast and on a Nest Hub (one accepted a 5 s session; sccast now retries at 720p after a refusal)
 - [ ] Test the HLS fallback on a device without mirroring
 - [ ] Test with a firewall on (ufw, firewalld)
 - [ ] Check that the TV applies the adaptive playout delay (the Sharp accepts it, still reports 100 ms)

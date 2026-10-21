@@ -149,7 +149,8 @@ Stuck on the Cast logo in HLS: the firewall most likely blocks port 8090.
 stream.
 
 "refused the stream": the device cannot decode the format. A Google Nest
-Hub plays `--resolution 1280x720` but refuses 1080p.
+Hub plays `--resolution 1280x720` but refuses 1080p. In screen mirroring,
+sccast offers 1280x720 by itself after a refusal.
 
 Sound before image: the PC speakers play live, a few seconds ahead of the TV.
 Mute the PC in the desktop: on PipeWire, the stream keeps its sound (checked
@@ -179,7 +180,7 @@ Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
 
 ## Limitations
 
-- Mirror: tested on one TV only (a Nest Hub accepted it once), no reconnection, `--latency` and
+- Mirror: tested on one TV only (a Nest Hub accepted it once), `--latency` and
   `--receiver` ignored. See [docs/cast-streaming.md](docs/cast-streaming.md).
 - HLS: 2 to 3 seconds of latency, as the stream is cut into 1-second
   segments and the receiver plays 1 second behind the newest one. The TV
