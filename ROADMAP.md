@@ -87,6 +87,20 @@ To do:
 
 Before starting, try [CastMirror](https://github.com/vindeckyy/CastMirror): a Windows app that already does screen mirroring to a Chromecast, with sound. [chromiacast](https://github.com/halfline/chromiacast) is a Rust Cast Streaming sender library, without capture.
 
+## OpenBoard (idea)
+
+OpenBoard has no runtime plugin system, and its W3C widgets cannot start a
+program or capture the screen. The light way: a button in the
+[OpenBoard fork](https://github.com/obook/OpenBoard) that starts
+`sccast cast --device ...` with `QProcess` and stops it with SIGTERM,
+which already frees the TV. Linux only until the Windows port.
+
+To do:
+
+- [ ] `sccast list --json`, for another program to offer the device choice
+- [ ] Stable status lines on the output (casting, reconnecting, error), for OpenBoard to show
+- [ ] "Cast to the TV" button in the OpenBoard fork
+
 ## Packaging and code
 
 Done:
