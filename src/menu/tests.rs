@@ -49,6 +49,24 @@ fn settings(bitrate: u32) -> Settings {
 }
 
 #[test]
+fn user_resolution_comes_back_after_a_device_lowered_it() {
+    let mut menu = Menu::idle();
+    let mut s = settings(2500);
+    // The Nest Hub took 1280x720: the menu shows it.
+    menu.device_resolution(&mut s, (1280, 720));
+    assert_eq!(s.stream.resolution, (1280, 720));
+    // The next cast (the Sharp) starts from the user's 1920x1080.
+    menu.restore_resolution(&mut s);
+    assert_eq!(s.stream.resolution, (1920, 1080));
+    // A resolution set by hand stays.
+    menu.device_resolution(&mut s, (1280, 720));
+    menu.chosen_resolution = None;
+    s.stream.resolution = (854, 480);
+    menu.restore_resolution(&mut s);
+    assert_eq!(s.stream.resolution, (854, 480));
+}
+
+#[test]
 fn long_device_list_scrolls() {
     let mut menu = Menu::idle();
     for i in 0..30 {

@@ -82,6 +82,8 @@ pub struct Menu {
     status_tx: Sender<Status>,
     status_rx: Receiver<Status>,
     live: Live,
+    /// The user's resolution while the menu shows the one a device took (Nest Hub: 1280x720).
+    chosen_resolution: Option<(u32, u32)>,
 }
 
 impl Menu {
@@ -109,6 +111,7 @@ impl Menu {
             status_tx,
             status_rx,
             live: Live::default(),
+            chosen_resolution: None,
         }
     }
 
@@ -145,6 +148,19 @@ impl Menu {
                 self.live.started = None;
                 self.status = status;
             }
+        }
+    }
+
+    /// A device took another resolution: show it, keep the user's for the next cast.
+    fn device_resolution(&mut self, s: &mut Settings, size: (u32, u32)) {
+        self.chosen_resolution.get_or_insert(s.stream.resolution);
+        s.stream.resolution = size;
+    }
+
+    /// Before a cast: back to the user's resolution, which the device may lower again.
+    pub fn restore_resolution(&mut self, s: &mut Settings) {
+        if let Some(size) = self.chosen_resolution.take() {
+            s.stream.resolution = size;
         }
     }
 
@@ -201,9 +217,8 @@ impl Menu {
                 }
             }
             while let Ok(status) = self.status_rx.try_recv() {
-                // Show the resolution the TV gets; the next cast starts from it.
                 if let Status::Resolution(size) = status {
-                    s.stream.resolution = size;
+                    self.device_resolution(s, size);
                     continue;
                 }
                 self.set_status(status);
@@ -240,8 +255,15 @@ impl Menu {
                 KeyCode::Home => state.select(Some(0)),
                 KeyCode::End if count > 0 => state.select(Some(count - 1)),
                 KeyCode::Tab | KeyCode::BackTab => self.on_settings = !self.on_settings,
-                KeyCode::Left | KeyCode::Char('h') if self.on_settings => change(s, self.row.selected().unwrap_or(0), -1),
-                KeyCode::Right | KeyCode::Char('l') if self.on_settings => change(s, self.row.selected().unwrap_or(0), 1),
+                // A change by hand becomes the user's choice.
+                KeyCode::Left | KeyCode::Char('h') if self.on_settings => {
+                    self.chosen_resolution = None;
+                    change(s, self.row.selected().unwrap_or(0), -1);
+                }
+                KeyCode::Right | KeyCode::Char('l') if self.on_settings => {
+                    self.chosen_resolution = None;
+                    change(s, self.row.selected().unwrap_or(0), 1);
+                }
                 KeyCode::Char('r') => self.scan(),
                 KeyCode::Enter => {
                     let list = self.list();

@@ -98,6 +98,7 @@ fn drive_menu(
         let keep: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
         stop_on_signal(stop, keep, quit);
         let out = Out::Menu(menu.status_sender());
+        menu.restore_resolution(s);
         let settings = s.clone();
         let screen = Arc::clone(&screen.lock().unwrap());
         menu.set_casting(Some(device.id.clone()));

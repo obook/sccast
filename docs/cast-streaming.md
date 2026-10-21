@@ -21,7 +21,8 @@ error.
   gives up. The whole ANSWER goes to the log.
 - If the ANSWER gives a screen smaller than the video
   (`display.dimensions`), sccast encodes at the screen size, without a new
-  OFFER. The menu's resolution follows.
+  OFFER. The menu shows that size, and goes back to the user's resolution
+  at the next cast.
 - No sender check: any program can do it, not only Chrome.
 - H.264 and Opus frames are encrypted (AES-128-CTR) and sent over RTP.
 - A Sender Report every 100 ms lets the TV time the frames.
