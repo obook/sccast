@@ -15,8 +15,8 @@ over HTTP on your local network and played by sccast's own receiver page:
 - PipeWire, with `pipewire-pulse` for sound.
 - GStreamer (tested with 1.24).
 - A Rust toolchain (`cargo`) 1.92 or newer, only to build from source.
-- Linux PC and TV with Chromecast built-in or Google Chromecast device on the same local network, mDNS (UDP 5353) allowed between
-  them.
+- The PC and the TV (Chromecast built-in or a Chromecast device) on the
+  same local network, with mDNS (UDP 5353) allowed between them.
 
 ## Install
 
@@ -95,8 +95,8 @@ then open a menu: the devices appear as they answer, and the command line
 options prefill the settings. Arrows move and change, Tab switches columns,
 Enter casts, or casts again with the new settings. The menu stays during the
 cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
-chooses another screen, `q` or Ctrl+C quits and frees the TV, and so does
-closing the terminal. In HLS, the receiver stays open on the TV between two
+chooses another screen, `q` or Ctrl+C quits and frees the TV. Closing the
+terminal frees it too. In HLS, the receiver stays open on the TV between two
 casts to the same TV.
 
 `cast` opens the screen picker, then starts the TV. In HLS it first waits
@@ -123,10 +123,11 @@ problem. VLC stutters on this live stream and is not a reliable check.
 ## Receiver (HLS)
 
 Screen mirroring uses Google's mirroring receiver (`0F5096E8`), built into
-the devices. In HLS, the TV runs sccast's receiver, the page in `docs/receiver/` served at
-<https://obook.github.io/sccast/receiver/> and published in the Google Cast
-console as application `8FE12008`. It plays 1 second behind the newest
-segment, against 3 for Google's Default Media Receiver.
+the devices. In HLS, the TV runs sccast's receiver: the page in
+`docs/receiver/`, served at <https://obook.github.io/sccast/receiver/> and
+published in the Google Cast console as application `8FE12008`. It plays
+1 second behind the newest segment, against 3 for Google's Default Media
+Receiver.
 
 If it does not start, `sccast` falls back to the Default Media Receiver
 (about 5 seconds of delay) and says so. A device may not know the
@@ -149,10 +150,9 @@ Stuck on the Cast logo in HLS: the firewall most likely blocks port 8090.
 stream.
 
 "refused the stream" or "could not play the stream": the device cannot
-decode the format. In HLS, a Google
-Nest Hub plays `--resolution 1280x720` but refuses 1080p. In screen
-mirroring it takes 1080p, and sccast would offer 1280x720 by itself after
-a refusal.
+decode the format. In HLS, a Google Nest Hub plays `--resolution 1280x720`
+but refuses 1080p. In screen mirroring, sccast sends the screen size the
+device reports and offers 1280x720 by itself after a refusal.
 
 Sound before image: the PC speakers play live, a few seconds ahead of the TV.
 Mute the PC in the desktop: on PipeWire, the stream keeps its sound (checked
@@ -182,8 +182,8 @@ Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
 
 ## Limitations
 
-- Mirror: tested on one TV and one Nest Hub, `--latency` and
-  `--receiver` ignored. See [docs/cast-streaming.md](docs/cast-streaming.md).
+- Mirror: tested on one TV and one Nest Hub. `--latency` and `--receiver`
+  do not apply. See [docs/cast-streaming.md](docs/cast-streaming.md).
 - HLS: 2 to 3 seconds of latency, as the stream is cut into 1-second
   segments and the receiver plays 1 second behind the newest one. The TV
   loads sccast's receiver from GitHub Pages, so it needs internet access.

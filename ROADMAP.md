@@ -16,7 +16,10 @@ Done:
 - [x] Mirror by default, HLS on a device without it
 - [x] Reconnect when the TV drops the session or stops answering (TV network cut for 20 s)
 - [x] Raise the playout delay from 100 to 400 ms on losses, lower it when calm (the Sharp applies it: 180 ms forced at 100, 500 ms at 400)
-- [x] Test on a Nest Hub: takes 1080p and scales it to its 1280x720 screen, no adaptive delay. In HLS it plays 720p and refuses 1080p, with a clear message
+- [x] Test on a Nest Hub: takes 1080p in mirror, no adaptive delay. In HLS it plays 720p and refuses 1080p, with a clear message
+- [x] Encode at the screen size the TV reports (Nest Hub: 1280x720); the next cast starts from the user's resolution
+- [x] Force a key frame every second until the TV acknowledges a video frame
+- [x] Change the audio delay during a cast
 
 To do:
 
@@ -25,7 +28,8 @@ To do:
 - [ ] Test with a firewall on (ufw, firewalld)
 - [ ] Tune the bitrate and delay steps on a lossy network
 - [ ] Read `rtt_ms` on the school Chromecast (TCP connect took 170 to 500 ms there): delay steps may need to go above 400 ms
-- [ ] Measure the lip sync
+- [ ] Lip sync: sound late in mirror on the Sharp (about 250 ms by eye), not in HLS. Measure it, then decide
+- [ ] Authenticate the TV (Cast device auth, as chromiacast does)
 
 ## HLS
 
@@ -72,10 +76,11 @@ Done:
 - [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0, v0.2.0 and v0.3.0
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
+- [x] Install the v0.3.0 .deb on another KDE neon PC and cast
 
 To do:
 
-- [x] Install the v0.3.0 .deb on another KDE neon PC and cast
+- [ ] Split `src/mirror/mod.rs`: 309 lines of code since the reconnection
 - [ ] Install the v0.3.0 .deb on Ubuntu 26.04 and cast
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
 - [ ] Cast for one hour without a cut
