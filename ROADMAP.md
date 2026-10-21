@@ -16,7 +16,7 @@ Done:
 - [x] Mirror by default, HLS on a device without it
 - [x] Reconnect when the TV drops the session or stops answering (TV network cut for 20 s)
 - [x] Raise the playout delay from 100 to 400 ms on losses, lower it when calm
-- [x] Test on a Nest Hub: takes 1080p and scales it to its 1280x720 screen, no adaptive delay
+- [x] Test on a Nest Hub: takes 1080p and scales it to its 1280x720 screen, no adaptive delay. In HLS it plays 720p and refuses 1080p, with a clear message
 
 To do:
 
