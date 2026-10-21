@@ -94,6 +94,12 @@ pub fn cast_screen(
     out: &Out,
 ) -> anyhow::Result<()> {
     tracing::info!(name = %device.name, ip = %device.ip, "casting");
+    // A panel takes the screenshare format, whatever the settings say.
+    if device.kind == device::discovery::Kind::Screenshare {
+        let settings = menu::Settings { stream: cli::Stream { format: cli::Format::Screenshare, ..s.stream.clone() }, ..s.clone() };
+        let host = std::net::SocketAddr::from((device.ip, device.port));
+        return crate::screenshare::cast(host, None, &settings, screen, stop, out);
+    }
     if let Out::Menu(_) = out {
         watch_round_trip(device, stop, out.clone());
     }

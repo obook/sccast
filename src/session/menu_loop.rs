@@ -102,9 +102,9 @@ fn drive_menu(
         let settings = s.clone();
         let screen = Arc::clone(&screen.lock().unwrap());
         menu.set_casting(Some(device.id.clone()));
-        // The mirror format closes its own app: nothing left open to track.
-        *tv.lock().unwrap() =
-            (settings.stream.format != cli::Format::Mirror).then(|| (device.clone(), settings.receiver.clone()));
+        // The mirror format closes its own app, and a panel has no app: nothing left open to track.
+        let tracked = settings.stream.format != cli::Format::Mirror && device.kind == device::discovery::Kind::Chromecast;
+        *tv.lock().unwrap() = tracked.then(|| (device.clone(), settings.receiver.clone()));
         let cast = std::thread::spawn(move || match cast_screen(&device, &settings, &screen, stop, Some(keep), &out) {
             Ok(()) => out.send(menu::Status::Ended),
             // The sharing may have been stopped from the desktop.

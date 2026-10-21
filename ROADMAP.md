@@ -31,6 +31,26 @@ To do:
 - [ ] Lip sync: sound late in mirror on the Sharp (about 250 ms by eye), not in HLS. Measure it, then decide
 - [ ] Authenticate the TV (Cast device auth, as chromiacast does)
 
+## Screenshare (interactive panels)
+
+The "classic" protocol of a classroom panel receiver, read from its Android
+sender. Not tested on a real panel yet. Notes in
+[docs/screenshare.md](docs/screenshare.md).
+
+Done (unverified on a panel):
+
+- [x] Command channel: varint length, protobuf message, JSON payload; connect, cast, heartbeat, stop, key frame request
+- [x] Video (H.264, SPS and PPS apart) and sound (AAC with ADTS) over TCP, `--format screenshare --host IP:PORT [--pin CODE]`
+- [x] Find panels with mDNS (`_sspcast._tcp`) next to the Chromecasts; choosing one casts in this format
+- [x] Reconnect after a loss
+
+To do:
+
+- [ ] Test on a real panel (ask before)
+- [ ] SSDP discovery, only if a panel does not answer mDNS
+- [ ] Touchback: touches on the panel drive the PC (UDP events, injected through the RemoteDesktop portal)
+- [ ] Follow the panel's size and frame rate requests, and its bitrate
+
 ## HLS
 
 sccast's receiver page and HTTP server: about 3 s of delay.

@@ -40,7 +40,8 @@ fn alerts_follow_thresholds() {
 }
 
 fn device(id: &str, name: &str, model: &str) -> CastDevice {
-    CastDevice { id: id.into(), name: name.into(), model: model.into(), ip: std::net::Ipv4Addr::LOCALHOST, port: 8009 }
+    let kind = crate::device::discovery::Kind::Chromecast;
+    CastDevice { id: id.into(), name: name.into(), model: model.into(), ip: std::net::Ipv4Addr::LOCALHOST, port: 8009, kind }
 }
 
 fn settings(bitrate: u32) -> Settings {
