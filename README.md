@@ -162,6 +162,10 @@ PCM (needed on a Sharp TV, with every app).
 Stutter, or sound ahead of a frozen image, on moving content: the TV may not
 decode 1080p in real time. Try `--resolution 1280x720 --bitrate 2500`.
 
+The TV image stays still while you work elsewhere: you shared one window
+in the dialog, not the whole screen. Only that window's changes reach the
+TV. Press `p` in the menu to choose again.
+
 The TV drops the session, or stops answering for 5 s in screen mirroring:
 `sccast` launches the receiver again, up to 3 times in 5 minutes, without
 limit in the menu. If the device no longer shows in `sccast list`, unplug it
