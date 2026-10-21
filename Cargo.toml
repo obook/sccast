@@ -27,6 +27,8 @@ ratatui = "0.30.2"
 rust_cast = { version = "0.21.0", features = ["thread_safe"] }
 # Already pulled by rust_cast: OFFER and ANSWER of the mirror format.
 serde_json = "1.0.154"
+# Already pulled by tokio: a small TCP send buffer for the screenshare format.
+socket2 = "0.6.5"
 tempfile = "3.27.0"
 tokio = { version = "1.54.0", features = ["rt", "net", "time"] }
 tokio-util = { version = "0.7.20", features = ["io"] }

@@ -10,7 +10,8 @@
 //! Licence: MIT
 
 mod offer;
-mod rate;
+// Also adapts the screenshare format's bitrate.
+pub(crate) mod rate;
 mod rtcp;
 mod rtp;
 mod send;

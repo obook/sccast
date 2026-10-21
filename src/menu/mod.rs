@@ -60,6 +60,8 @@ pub enum Status {
     Served(ByteCounter),
     /// Frames dropped by the capture since the start.
     Dropped(Arc<AtomicU64>),
+    /// Frames dropped because the network did not take them in time (screenshare).
+    NetworkDropped(Arc<AtomicU64>),
     /// Time to connect to the TV's Cast port, None if it did not answer.
     RoundTrip(Option<Duration>),
     /// The cast went down to this resolution (the TV refused the one set).
@@ -148,6 +150,7 @@ impl Menu {
             Status::Segments(dir) => self.live.segments = Some(dir),
             Status::Served(counter) => self.live.served = Some((counter, None)),
             Status::Dropped(counter) => self.live.dropped = Some(counter),
+            Status::NetworkDropped(counter) => self.live.network_dropped = Some(counter),
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
             // Handled in next(), which holds the settings.
             Status::Resolution(_) => {}

@@ -15,7 +15,7 @@ mod wire;
 
 use std::io;
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -43,8 +43,8 @@ const KEY_FRAME: (i32, i32) = (6, 113);
 const INDEX_VERSION: i32 = 63;
 /// The Android sender sends a heartbeat after 3 s without writing.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
-/// Twice the sender's 10 s read timeout: the panel is gone.
-const SILENCE: Duration = Duration::from_secs(20);
+/// The Android sender gives up after three read timeouts of 10 s.
+const SILENCE: Duration = Duration::from_secs(30);
 /// TCP connections and writes; the answers wait for a person (approval.rs).
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -59,6 +59,8 @@ impl Commands {
     fn open(host: SocketAddr) -> anyhow::Result<Self> {
         let socket = TcpStream::connect_timeout(&host, ANSWER_TIMEOUT).with_context(|| format!("cannot reach {host}"))?;
         socket.set_nodelay(true)?;
+        // A heartbeat must not block on a dead link.
+        socket.set_write_timeout(Some(ANSWER_TIMEOUT))?;
         let mut reader = socket.try_clone()?;
         let (tx, incoming) = mpsc::channel();
         std::thread::spawn(move || loop {
@@ -117,10 +119,13 @@ fn now_ms() -> i64 {
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     // A first failure is a wrong address or a refusal: report it.
     let mut why = session(host, name, s, screen, stop, out)?;
+    // Up to 3 times in 5 min from the terminal, without limit from the menu, as mirror.
+    let mut drops = crate::device::Drops::new(matches!(out, Out::Menu(_)));
     while let Some(lost) = why {
-        tracing::warn!(%lost, "panel lost");
+        tracing::warn!(%lost, %host, "panel lost");
+        let count = drops.count(name, &lost)?;
         out.report(crate::device::Report::Reconnecting);
-        out.say(&format!("Lost the panel ({lost}). Reconnecting..."));
+        out.say(&format!("Lost {name} ({lost}). Reconnecting to the panel ({count})..."));
         std::thread::sleep(crate::device::RECONNECT_DELAY);
         if stop.load(Ordering::SeqCst) {
             break;
@@ -160,22 +165,25 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
     let video_socket = media::connect(host, port("videoPort")?, ANSWER_TIMEOUT)?;
     let audio_socket = if s.stream.no_audio { None } else { Some(media::connect(host, port("audioPort")?, ANSWER_TIMEOUT)?) };
 
+    // A new capture starts with a key frame, after a reconnection too.
     let capture = Capture::start(Some(screen), &s.stream, s.audio_delay)?;
     let encoder = capture.element("venc").context("no encoder in the pipeline")?;
     // ponytail: leaks one flag per session (a byte), as mirror does: the threads want a 'static flag.
     let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
     let index = (version >= INDEX_VERSION).then_some(0);
     // Live panel of the menu: bytes sent (bitrate), frames dropped, audio delay during the cast.
-    let sent = Arc::new(AtomicU64::new(0));
-    let counted = Arc::clone(&sent);
-    out.send(Status::Served(Box::new(move || counted.load(Ordering::Relaxed))));
+    let link = media::Link::default();
+    let sent = Arc::clone(&link.sent);
+    out.send(Status::Served(Box::new(move || sent.load(Ordering::Relaxed))));
     out.send(Status::Dropped(Arc::clone(&capture.dropped)));
+    out.send(Status::NetworkDropped(Arc::clone(&link.dropped)));
     if let Some(pad) = capture.audio_pad() {
         out.send(Status::AudioPad(pad));
     }
-    let mut senders = vec![send_frames(&capture, "sink", video_socket, index, &sent, ended)?];
+    let bitrate = s.stream.bitrate;
+    let mut senders = vec![send_frames(&capture, "sink", video_socket, index, bitrate, &link, ended)?];
     if let Some(socket) = audio_socket {
-        senders.push(send_frames(&capture, "asink", socket, None, &sent, ended)?);
+        senders.push(send_frames(&capture, "asink", socket, None, bitrate, &link, ended)?);
     }
 
     let mut touchback = touch::Touchback::default();
@@ -187,21 +195,21 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
             break None;
         }
         if ended.load(Ordering::SeqCst) {
-            break Some("a media connection closed".to_string());
+            break Some(link.lost().unwrap_or_else(|| "a media connection closed".into()));
         }
         if last_heard.elapsed() > SILENCE {
-            break Some("no message for 20 s".to_string());
+            break Some(format!("commands: nothing read for {} s", SILENCE.as_secs()));
         }
         if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
             if let Err(e) = commands.send(HEARTBEAT, &json!({"sentTimeMs": now_ms()})) {
-                break Some(e.to_string());
+                break Some(format!("commands: {}", media::cause(&e)));
             }
             last_heartbeat = Instant::now();
         }
         let m = match commands.incoming.recv_timeout(Duration::from_millis(200)) {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => break Some("command channel closed".to_string()),
-            Ok(Err(e)) => break Some(e.to_string()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Some("commands: reader stopped".into()),
+            Ok(Err(e)) => break Some(format!("commands: {}", media::cause(&e))),
             Ok(Ok(m)) => m,
         };
         last_heard = Instant::now();

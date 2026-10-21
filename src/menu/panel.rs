@@ -62,11 +62,17 @@ impl Menu {
             ]),
             Line::from(vec![
                 label("Network"),
-                // Time for the TV to download one 1-second segment.
-                bold(
-                    live.fetch.map_or("-".into(), |f| format!("segment {:.2} s", f.as_secs_f64())),
-                    warn(live.fetch.is_some_and(|f| f > SLOW_FETCH)),
-                ),
+                // HLS: time for the TV to download one 1-second segment. Screenshare: frames dropped.
+                match (&live.network_dropped, live.fetch) {
+                    (Some(n), _) => {
+                        let n = n.load(std::sync::atomic::Ordering::Relaxed);
+                        bold(format!("{n} frames dropped"), warn(n > 0))
+                    }
+                    (None, fetch) => bold(
+                        fetch.map_or("-".into(), |f| format!("segment {:.2} s", f.as_secs_f64())),
+                        warn(fetch.is_some_and(|f| f > SLOW_FETCH)),
+                    ),
+                },
                 Span::styled("   ping ", Style::new().fg(Color::Gray)),
                 bold(
                     match live.round_trip {

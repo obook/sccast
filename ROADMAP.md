@@ -42,7 +42,9 @@ Done (unverified on a panel):
 - [x] Command channel: varint length, protobuf message, JSON payload; connect, cast, heartbeat, stop, key frame request
 - [x] Video (H.264, SPS and PPS apart) and sound (AAC with ADTS) over TCP, `--format screenshare --host IP:PORT [--pin CODE]`
 - [x] Find panels with mDNS (`_sspcast._tcp`) next to the Chromecasts; choosing one casts in this format
-- [x] Reconnect after a loss; a refusal on the panel ends the cast
+- [x] Reconnect after a loss (3 times in 5 min from the terminal, no limit from the menu), each cause logged; a refusal on the panel ends the cast
+- [x] Bounded delay over TCP: small send buffer, drop frames until a key frame when the network falls behind, lower the bitrate
+- [x] Find a panel by the code it shows (`--pin`, `c` in the menu)
 - [x] Menu: Enter on a panel asks for the code it shows, then counts down while someone allows the cast on the panel (90 s)
 - [x] Menu: bitrate, dropped frames and live audio delay for a panel too
 

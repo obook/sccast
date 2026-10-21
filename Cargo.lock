@@ -2242,6 +2242,7 @@ dependencies = [
  "ratatui",
  "rust_cast",
  "serde_json",
+ "socket2",
  "tempfile",
  "tokio",
  "tokio-util",

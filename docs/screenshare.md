@@ -97,6 +97,21 @@ or no answer ends the cast without reconnecting. Cast answer codes, from the
 Android sender's action names: -100 failure, -101 too many devices, -102
 refused, -103 panel not ready. The panel's own texts are not decoded.
 
+Losses and delay. At school the vendor's own app often loses the panels,
+so sccast plans for it:
+- After a loss (EOF, RST, a write error, nothing read for 30 s, or 10 s
+  without sending a byte), sccast connects again to the same address with
+  the same device id, asks for the cast again and restarts the video on a
+  key frame. Up to 3 times in 5 min from the terminal, without limit from
+  the menu. Each cause goes to the log (`$XDG_RUNTIME_DIR/sccast.log` from
+  the menu) with its time. Hypothesis: a known device id may spare a new
+  approval on the panel.
+- TCP queues what the network cannot carry. The media sockets have a
+  64 KiB send buffer; a frame that comes while the previous one is still
+  unsent is dropped, the video then waits for a key frame (asked to the
+  encoder), and the bitrate goes down by a fifth, back up by a tenth after
+  10 s without drops (as mirror). The menu's Live panel counts the drops.
+
 Heartbeat (`com/seewo/swstclient/module/network/codec/b.java`): after 3 s
 without writing, the sender sends one. After 10 s without reading it sends
 one too. After two such silences it gives up.
