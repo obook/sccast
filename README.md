@@ -148,7 +148,8 @@ Stuck on the Cast logo in HLS: the firewall most likely blocks port 8090.
 `RUST_LOG=sccast=info,tower_http=debug` shows whether the TV requests the
 stream.
 
-"refused the stream": the device cannot decode the format. In HLS, a Google
+"refused the stream" or "could not play the stream": the device cannot
+decode the format. In HLS, a Google
 Nest Hub plays `--resolution 1280x720` but refuses 1080p. In screen
 mirroring it takes 1080p, and sccast would offer 1280x720 by itself after
 a refusal.

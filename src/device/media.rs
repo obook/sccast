@@ -108,6 +108,8 @@ pub(super) fn play_session(
         Err(e) => return lost(e),
     };
     let mut reloads = 0;
+    // Never played: a give-up then means the device cannot decode the stream.
+    let mut played = false;
 
     report(Report::Say(&format!("Casting to {}. Ctrl+C stops.", device.name)));
     let mut app_seen = false;
@@ -140,6 +142,7 @@ pub(super) fn play_session(
                 for entry in status.entries.into_iter().filter(|e| e.media_session_id == current) {
                     tracing::info!(state = ?entry.player_state, time = ?entry.current_time, "media");
                     report(Report::Player(&entry.player_state));
+                    played |= matches!(entry.player_state, PlayerState::Playing);
                     if matches!(entry.player_state, PlayerState::Idle) && entry.idle_reason.is_some() {
                         tracing::info!(reason = ?entry.idle_reason, "playback ended");
                         // A live stream has no end: the player gave up, so load it again.
@@ -153,6 +156,19 @@ pub(super) fn play_session(
                                 Err(e) => return lost(e),
                             };
                             break;
+                        }
+                        // Not a stop asked by the user: say why, or the menu shows "Stopped".
+                        if live && gave_up {
+                            close_app();
+                            if !played {
+                                // A Nest Hub does this with 1080p in HLS (2026-10-21).
+                                anyhow::bail!(
+                                    "{} could not play the stream: it may not decode this format, \
+                                     try 1280x720 or a lower bitrate",
+                                    device.name
+                                );
+                            }
+                            anyhow::bail!("{} gave up the stream {} times", device.name, MAX_RELOADS + 1);
                         }
                         return Ok(Outcome::Idle);
                     }
