@@ -87,8 +87,12 @@ pub struct RtpStream {
     reports: VecDeque<(u32, Instant)>,
     /// Round trip to the receiver, from its last Receiver Report.
     pub rtt: Option<Duration>,
-    /// Playout delay in ms written in each frame; None when the receiver did not accept the extension.
+    /// Playout delay in ms; None when the receiver did not accept the extension.
     pub playout_delay: Option<u16>,
+    /// The next frame carries the new delay. Only that one, as openscreen does: with the
+    /// extension on every frame the Sharp played the sound about 1.5 s late, about 250 ms
+    /// once sent on changes only (by eye, 2026-10-21).
+    delay_changed: bool,
 }
 
 impl RtpStream {
@@ -108,6 +112,15 @@ impl RtpStream {
             reports: VecDeque::with_capacity(REPORT_HISTORY),
             rtt: None,
             playout_delay: None,
+            delay_changed: false,
+        }
+    }
+
+    /// New playout delay, sent in the next frame. No-op without the extension or if unchanged.
+    pub fn set_playout_delay(&mut self, ms: u16) {
+        if self.playout_delay.is_some_and(|current| current != ms) {
+            self.playout_delay = Some(ms);
+            self.delay_changed = true;
         }
     }
 
@@ -123,12 +136,14 @@ impl RtpStream {
     }
 
     /// The receiver has every frame up to `frame`: they will not be asked for again.
-    pub fn acked(&mut self, frame: u8) {
+    /// False when the checkpoint is before the first frame (nothing received yet).
+    pub fn acked(&mut self, frame: u8) -> bool {
         let id = self.frame_id(frame);
         // Wrapping order: `f` is at or before `id`.
         while self.sent.front().is_some_and(|f| id.wrapping_sub(f.id) < 1 << 31) {
             self.sent.pop_front();
         }
+        id < self.next_frame
     }
 
     /// Round trip from a Receiver Report: time since our Sender Report, minus the receiver's hold.
@@ -153,8 +168,10 @@ impl RtpStream {
         self.next_frame = id.wrapping_add(1);
         let mut payload = data.to_vec();
         crypt(&self.keys, id, &mut payload);
-        // Room for the delay extension in every packet keeps them all under MAX_PACKET.
-        let chunk = MAX_PACKET - HEADER - self.playout_delay.map_or(0, |_| DELAY_EXTENSION);
+        // A lost first packet is resent from the cache, extension included.
+        let announce = self.playout_delay.filter(|_| std::mem::take(&mut self.delay_changed));
+        // Room for the extension in every packet of that frame keeps them all under MAX_PACKET.
+        let chunk = MAX_PACKET - HEADER - announce.map_or(0, |_| DELAY_EXTENSION);
         // An empty frame still needs one packet, or the receiver waits for its id.
         let count = payload.len().div_ceil(chunk).max(1);
         // A delta frame of H.264 without B-frames refers to the previous one.
@@ -169,7 +186,7 @@ impl RtpStream {
             packet.extend(timestamp.to_be_bytes());
             packet.extend(self.ssrc.to_be_bytes());
             // Only the first packet carries the delay, as openscreen does.
-            let delay = self.playout_delay.filter(|_| index == 0);
+            let delay = announce.filter(|_| index == 0);
             // Key frame flag, "has reference frame id" flag, extension count, then truncated frame ids.
             packet.push(if key_frame { 0xc0 } else { 0x40 } | u8::from(delay.is_some()));
             packet.push(id as u8);
@@ -289,8 +306,10 @@ mod tests {
         assert!(stream.lost(9, 0, 0, now).is_empty());
         assert_eq!(stream.total_octets, 3003);
 
+        // Checkpoint 0xff: before frame 0, nothing received yet.
+        assert!(!stream.acked(0xff));
         // Frame 0 acknowledged: no longer resent. Frame 1 still is.
-        stream.acked(0);
+        assert!(stream.acked(0));
         assert!(stream.lost(0, 0xffff, 0, now + RESEND_SPACING).is_empty());
         assert_eq!(stream.lost(1, 0xffff, 0, now).len(), 1);
     }
@@ -298,8 +317,11 @@ mod tests {
     #[test]
     fn writes_the_playout_delay() {
         let mut stream = RtpStream::new(SSRC, PAYLOAD_TYPE, 90_000, KEYS);
-        stream.playout_delay = Some(300);
+        stream.playout_delay = Some(100);
         let frame = vec![7u8; 2000];
+        // Unchanged since the OFFER: no extension.
+        assert_eq!(stream.packetize(&frame, Duration::ZERO, false)[0][12], 0x40);
+        stream.set_playout_delay(300);
         let packets = stream.packetize(&frame, Duration::ZERO, false).to_vec();
         assert_eq!(packets.len(), 2);
         // Delta frame, one extension, then type 1 size 2 and 300 ms after the reference id.
@@ -308,6 +330,14 @@ mod tests {
         assert_eq!(packets[1][12], 0x40, "first packet only");
         assert!(packets.iter().all(|p| p.len() <= MAX_PACKET));
         assert_eq!(packets[0].len() - HEADER - DELAY_EXTENSION + packets[1].len() - HEADER, 2000);
+        // The next frame does not repeat it, and an unchanged delay is not sent again.
+        assert_eq!(stream.packetize(&frame, Duration::ZERO, false)[0][12], 0x40);
+        stream.set_playout_delay(300);
+        assert_eq!(stream.packetize(&frame, Duration::ZERO, false)[0][12], 0x40);
+        // Without the extension, nothing is ever written.
+        let mut plain = RtpStream::new(SSRC, PAYLOAD_TYPE, 90_000, KEYS);
+        plain.set_playout_delay(300);
+        assert_eq!(plain.packetize(&frame, Duration::ZERO, false)[0][12], 0x40);
     }
 
     #[test]

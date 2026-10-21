@@ -33,6 +33,7 @@ pub fn send_frames(
     let session = Arc::clone(session);
     Ok(std::thread::spawn(move || {
         let stream = if video { &session.video } else { session.audio.as_ref().expect("audio stream") };
+        let mut logged = Instant::now();
         while !stop.load(Ordering::SeqCst) {
             let Some(sample) = sink.emit_by_name::<Option<gst::Sample>>("try-pull-sample", &[&100_000_000u64]) else {
                 // At the end of stream the pull returns at once: stop instead of spinning.
@@ -48,6 +49,12 @@ pub fn send_frames(
                 .and_then(|segment| segment.downcast_ref::<gst::ClockTime>())
                 .and_then(|segment| segment.to_running_time(buffer.pts()));
             let Some(running) = running else { continue };
+            // Lip sync check: how old each stream's frames are when they leave (negative: dated ahead).
+            if logged.elapsed() >= Duration::from_secs(10) {
+                let age_ms = session.running().as_millis() as i64 - Duration::from(running).as_millis() as i64;
+                tracing::debug!(stream = if video { "video" } else { "audio" }, age_ms, "frame age at send");
+                logged = Instant::now();
+            }
             let Ok(map) = buffer.map_readable() else { continue };
             let key_frame = !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT);
             let mut stream = stream.lock().unwrap();
@@ -74,6 +81,7 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
         let mut logged = Instant::now();
         let started = Instant::now();
         let mut heard: Option<Instant> = None;
+        let mut video_acked = false;
         let mut delay = Delay::new(started);
         let adaptive = session.video.lock().unwrap().playout_delay.is_some();
         let mut retarget = |trouble: bool| {
@@ -84,7 +92,7 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
                 tracing::info!(ms, "playout delay");
                 // Same delay on both streams, or lip sync would drift.
                 for stream in std::iter::once(&session.video).chain(&session.audio) {
-                    stream.lock().unwrap().playout_delay = Some(ms);
+                    stream.lock().unwrap().set_playout_delay(ms);
                 }
             }
         };
@@ -92,6 +100,17 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
             if last_report.elapsed() >= REPORT_INTERVAL {
                 session.send_reports();
                 last_report = Instant::now();
+            }
+            // The TV may have dropped the first key frame, sent before its decoder was ready: until
+            // it acknowledges a video frame, one per second instead of one per 5 s (chromiacast).
+            if !video_acked
+                && started.elapsed() >= KEY_FRAME_SPACING
+                && last_key_frame.is_none_or(|t| t.elapsed() >= KEY_FRAME_SPACING)
+            {
+                tracing::debug!("key frame probe");
+                request_key_frame(&encoder);
+                last_key_frame = Some(Instant::now());
+                key_frames += 1;
             }
             if logged.elapsed() >= Duration::from_secs(10) {
                 let rtt_ms = session.video.lock().unwrap().rtt.map(|rtt| rtt.as_millis());
@@ -130,7 +149,11 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
                     }
                     Feedback::Ack { ssrc, frame } => {
                         if let Some(stream) = session.stream(ssrc) {
-                            stream.lock().unwrap().acked(frame);
+                            let real = stream.lock().unwrap().acked(frame);
+                            if ssrc == VIDEO_SSRC && real && !video_acked {
+                                tracing::info!(after_ms = started.elapsed().as_millis(), "first video frame acknowledged");
+                                video_acked = true;
+                            }
                         }
                     }
                     Feedback::Report { ssrc, fraction, last_sr, since_sr } => {

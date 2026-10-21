@@ -36,8 +36,10 @@ error.
 - The playout delay starts at 100 ms. It goes up one step (200, 300,
   400 ms) when the TV reports more than 2 % of packets lost or asks for a
   key frame, at most every 2 s, and down one step after 30 s without
-  trouble. It travels in an RTP extension on the first packet of each frame,
-  the same on both streams, if the ANSWER accepts `adaptive_playout_delay`.
+  trouble. It travels in an RTP extension on the first packet of the frame
+  after a change, the same on both streams, if the ANSWER accepts
+  `adaptive_playout_delay`. On every frame, the Sharp played the sound
+  about 1.5 s late.
   Otherwise it stays at 100 ms. The Sharp applies it (stopwatch photos
   below), though its feedback keeps reporting the OFFER's 100 ms.
 - A session is lost when the control connection drops, the TV closes it, or
@@ -82,5 +84,10 @@ only reads files.
 - A firewall on the PC (ufw, firewalld).
 - The OFFER goes to the broadcast address `*` (rust_cast has no other way):
   checked on the Sharp and one Nest Hub only.
-- Lip sync measure (the user saw maybe a slight offset).
+- Lip sync: sound about 250 ms late on the Sharp, by eye (2026-10-21). Both
+  streams leave the PC fresh (audio 20 ms old, video 30 to 65 ms). A
+  negative audio delay only helps within the playout delay (100 ms): the TV
+  cannot play a sound before it arrives. To measure with a slow motion film.
+- Until the TV acknowledges a video frame, sccast forces a key frame every
+  second. The Sharp acknowledged the first one after 210 ms.
 - Tuning: delay and bitrate steps are guesses (delay steps from CastMirror).
