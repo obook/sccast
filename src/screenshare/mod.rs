@@ -9,6 +9,7 @@
 
 mod approval;
 mod media;
+pub mod pin;
 mod touch;
 mod wire;
 

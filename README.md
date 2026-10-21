@@ -116,7 +116,7 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--format mirror` | `mirror` | Google's screen mirroring, H.264 and Opus over RTP, about 0.15 s of delay. HLS on a device without it |
 | `--format hls` | | 1-second HLS segments, about 3 s of delay. `serve`, `--url` and `--file` always use it |
 | `--format mkv` | | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
-| `--format screenshare` | | Interactive panels with the Bytello Share receiver, untested on a real panel. Chosen by itself for a panel found on the network; `--host IP:PORT` and `--pin CODE` reach one by address. See [docs/screenshare.md](docs/screenshare.md) |
+| `--format screenshare` | | Interactive panels with the Bytello Share receiver, untested on a real panel. Chosen by itself for a panel found on the network. `--pin CODE` (the code shown on the panel) or `--host IP:PORT` reaches one that is not; in the menu, `c`. See [docs/screenshare.md](docs/screenshare.md) |
 | `--audio-delay MS` | `0` | Delays the sound on the TV (`cast` only). The menu changes it during a cast in screen mirroring |
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |

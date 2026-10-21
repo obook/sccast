@@ -49,10 +49,11 @@ pub enum Command {
         /// PC was in use (2026-10-21); 1.5 s did not.
         #[arg(long, default_value_t = 1.5)]
         latency: f64,
-        /// Screenshare format: the panel's address and command port. Unverified on a real panel.
-        #[arg(long, required_if_eq("format", "screenshare"))]
+        /// Screenshare format: the panel's address and command port, when --pin cannot give it.
+        #[arg(long)]
         host: Option<std::net::SocketAddr>,
-        /// Screenshare format: the code shown on the panel, if it asks for one.
+        /// Screenshare format: the 6-character code shown on the panel. It also gives the panel's
+        /// address (unverified on a real panel).
         #[arg(long)]
         pin: Option<String>,
         #[command(flatten)]

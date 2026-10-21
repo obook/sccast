@@ -132,7 +132,7 @@ impl Menu {
 
     fn draw_keys(&self, f: &mut Frame, area: ratatui::layout::Rect) {
         let mut keys =
-            vec![("↑↓", "move"), ("←→", "change"), ("Tab", "switch"), ("r", "rescan"), ("p", "screen"), ("Enter", "cast")];
+            vec![("↑↓", "move"), ("←→", "change"), ("Tab", "switch"), ("r", "rescan"), ("p", "screen"), ("c", "panel code"), ("Enter", "cast")];
         if self.casting.is_some() {
             keys.push(("s", "stop"));
         }

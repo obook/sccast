@@ -89,8 +89,8 @@ pub struct Menu {
     chosen_resolution: Option<(u32, u32)>,
     /// Sound source of the running cast, for the live audio delay.
     audio_pad: Option<gstreamer::Pad>,
-    /// Panel whose code is being typed, and the code so far.
-    code_entry: Option<(CastDevice, String)>,
+    /// Panel whose code is being typed (None: a panel not in the list, `c`), and the code so far.
+    code_entry: Option<(Option<CastDevice>, String)>,
 }
 
 impl Menu {
@@ -266,15 +266,19 @@ impl Menu {
             let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
             if let Some((panel, typed)) = self.code_entry.as_mut().filter(|_| !ctrl_c) {
                 match code::key(typed, key.code) {
-                    code::Typed::Editing => self.status = Status::Info(code::prompt(&panel.name, typed)),
+                    code::Typed::Editing => self.status = Status::Info(code::prompt(panel.as_ref(), typed)),
                     code::Typed::Cancelled => {
                         self.code_entry = None;
                         self.status = Status::Info("Choose a device, then Enter".into());
                     }
                     code::Typed::Done => {
                         let (panel, typed) = self.code_entry.take().expect("code entry");
-                        s.pin = (!typed.is_empty()).then_some(typed);
-                        return Ok(Action::Cast(panel));
+                        s.pin = (!typed.is_empty()).then(|| typed.clone());
+                        // A panel not in the list: its code gives its address.
+                        match panel.map_or_else(|| code::panel(&typed), Ok) {
+                            Ok(panel) => return Ok(Action::Cast(panel)),
+                            Err(e) => self.status = Status::Error(e),
+                        }
                     }
                 }
                 continue;
@@ -287,6 +291,10 @@ impl Menu {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(Action::Quit),
                 KeyCode::Char('s') if self.casting.is_some() => return Ok(Action::Stop),
                 KeyCode::Char('p') => return Ok(Action::PickScreen),
+                KeyCode::Char('c') => {
+                    self.status = Status::Info(code::prompt(None, ""));
+                    self.code_entry = Some((None, String::new()));
+                }
                 KeyCode::Up | KeyCode::Char('k') if count > 0 => {
                     state.select(Some(state.selected().unwrap_or(0).checked_sub(1).unwrap_or(count - 1)));
                 }
@@ -309,8 +317,8 @@ impl Menu {
                     if device.kind == discovery::Kind::Screenshare {
                         // The panel may show a code to type first; the last one is offered again.
                         let typed = s.pin.clone().unwrap_or_default();
-                        self.status = Status::Info(code::prompt(&device.name, &typed));
-                        self.code_entry = Some((device, typed));
+                        self.status = Status::Info(code::prompt(Some(&device), &typed));
+                        self.code_entry = Some((Some(device), typed));
                         continue;
                     }
                     return Ok(Action::Cast(device));

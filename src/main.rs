@@ -73,8 +73,13 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             let settings = menu::Settings { stream, audio_delay, latency, receiver, pin };
-            // A panel given by address, when mDNS does not show it.
-            if let Some(host) = host.filter(|_| settings.stream.format == cli::Format::Screenshare) {
+            // A panel given by address or by its code, without discovery.
+            if settings.stream.format == cli::Format::Screenshare && device.is_none() {
+                let host = match (host, settings.pin.as_deref()) {
+                    (Some(host), _) => host,
+                    (None, Some(code)) => screenshare::pin::decode(code).map_err(anyhow::Error::msg)?.into(),
+                    (None, None) => bail!("--format screenshare needs --pin CODE, --host IP:PORT or --device NAME"),
+                };
                 let screen = capture::ScreenCast::open()?;
                 return screenshare::cast(host, &host.to_string(), &settings, &screen, stop_flag()?, &Out::Term);
             }

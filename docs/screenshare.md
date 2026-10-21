@@ -20,10 +20,16 @@ File references point into the jadx output of the APK
 - SSDP: M-SEARCH with `ST: _sspcast._tcp` to 239.255.255.250 and
   239.255.255.150, port 1990 (`com/seewo/libdiscovery/ssdp/a.java`).
   Not built: only worth it if a real panel does not answer mDNS.
-- The PIN shown on the panel holds its address too, decoded by a native
-  library that is not in the APK we have. Without discovery,
-  `sccast cast --format screenshare --host IP:PORT [--pin CODE]` connects
-  directly.
+- The 6-character code shown on the panel holds its address. Decoding read
+  from the Windows client (`PinCodeService.dll`, `ParsePinCode`) and the
+  Android port table (`com/bytello/libpincode/c.java`), in
+  `src/screenshare/pin.rs`: W, X, Y, Z stand for 0, 1, I, O; six digits give
+  192.168.x.x; a base-32 value gives 10.x.x.x or 172.16.0.0/12, masked with
+  a small key; 2 bits pick the command port among 7385, 29736, 2067 and
+  39458. Other codes need the vendor's cloud lookup: not supported.
+  Unverified on a real panel.
+- Without discovery: `sccast cast --format screenshare --pin CODE`, or
+  `--host IP:PORT`. In the menu, `c` casts to a panel by its code.
 
 No TLS and no encryption seen on the command, video or audio sockets
 (unverified on the wire).
