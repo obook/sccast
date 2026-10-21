@@ -70,6 +70,23 @@ To do:
 - [ ] Tune the alert thresholds on the school network
 - [ ] Check the launch retry on a cold Chromecast (just plugged in)
 
+## Windows (not started)
+
+Discovery, Cast control, the HTTP server, the menu, the mirror sender and
+the encoding already use cross-platform crates and GStreamer. Not checked:
+that `gstreamer-rs` builds on Windows.
+
+To do:
+
+- [ ] Screen capture: [`d3d11screencapturesrc`](https://gstreamer.freedesktop.org/documentation/d3d11/d3d11screencapturesrc.html) instead of the portal and `pipewiresrc`
+- [ ] PC sound: [`wasapi2src`](https://gstreamer.freedesktop.org/documentation/wasapi2/wasapi2src.html) with `loopback=true` instead of `pulsesrc`
+- [ ] AES keys from [`getrandom`](https://docs.rs/getrandom) instead of `/dev/urandom`
+- [ ] Menu CPU and load without `/proc`, or leave them out
+- [ ] Build with the GStreamer MSVC runtime and development installers ([download](https://gstreamer.freedesktop.org/download/), [gstreamer-rs](https://gitlab.freedesktop.org/gstreamer/gstreamer-rs) for the setup)
+- [ ] Installer that ships or requires the GStreamer runtime
+
+Before starting, try [CastMirror](https://github.com/vindeckyy/CastMirror): a Windows app that already does screen mirroring to a Chromecast, with sound. [chromiacast](https://github.com/halfline/chromiacast) is a Rust Cast Streaming sender library, without capture.
+
 ## Packaging and code
 
 Done:
