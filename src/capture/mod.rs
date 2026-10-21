@@ -57,6 +57,14 @@ impl Capture {
         let bin = pipeline.downcast_ref::<gst::Bin>().context("pipeline is not a bin")?;
         if let Some(src) = bin.by_name("src") {
             restamp_on_arrival(&src, &pipeline)?;
+            // The size PipeWire really sends: a whole multi-monitor workspace shows here.
+            if let Some(pad) = src.static_pad("src") {
+                pad.connect_notify(Some("caps"), |pad, _| {
+                    if let Some(caps) = pad.current_caps() {
+                        tracing::info!(%caps, "screen caps");
+                    }
+                });
+            }
         }
         // The leaky queue before the encoder overflows when the PC cannot encode fast enough:
         // each overrun drops a frame.

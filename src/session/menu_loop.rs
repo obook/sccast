@@ -21,12 +21,12 @@ use crate::{cli, menu};
 pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // Ctrl+C is a key in the menu; the flag still catches SIGTERM.
     let quit = stop_flag()?;
-    // The screen first, before the menu takes the terminal.
-    let screen = ScreenCast::open(settings.touchback)?;
-    // A fresh log for each run.
+    // A fresh log for each run, open before the portal so its answer is logged too.
     if let Ok(file) = std::fs::File::create(crate::log_path()) {
         let _ = crate::MENU_LOG.set(file);
     }
+    // The screen first, before the menu takes the terminal.
+    let screen = ScreenCast::open(settings.touchback)?;
     let mut terminal = ratatui::init();
     let stderr_to_log = crate::MENU_LOG.get().and_then(|file| super::terminal::StderrToFile::new(file).ok());
     let result = drive_menu(&mut terminal, &mut settings, screen, quit);
@@ -44,6 +44,9 @@ fn drive_menu(
     quit: &'static AtomicBool,
 ) -> anyhow::Result<()> {
     let mut menu = menu::Menu::new();
+    if let Some(note) = screen.note() {
+        menu.set_status(menu::Status::Info(note));
+    }
     // Chosen before the menu, kept for every cast; p replaces it.
     let screen = Arc::new(Mutex::new(Arc::new(screen)));
     // Stop and keep flags of the running cast, and its thread.
@@ -176,8 +179,9 @@ fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>, touchbac
                     (true, true) => "Screen and pointer granted: touchback on. Enter casts it.",
                     (true, false) => "Screen changed, but the pointer was not granted: touchback off.",
                 };
+                let said = opened.note().unwrap_or_else(|| said.to_string());
                 *slot.lock().unwrap() = Arc::new(opened);
-                out.say(said);
+                out.say(&said);
             }
             // Not an Error status: that would end the stats of the running cast.
             Err(e) => out.say(&format!("Screen not changed: {e:#}")),
