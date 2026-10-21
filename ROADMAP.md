@@ -15,7 +15,7 @@ Done:
 - [x] Menu: Enter, `s`, `q` and closing the terminal free the TV
 - [x] Mirror by default, HLS on a device without it
 - [x] Reconnect when the TV drops the session or stops answering (TV network cut for 20 s)
-- [x] Raise the playout delay from 100 to 400 ms on losses, lower it when calm
+- [x] Raise the playout delay from 100 to 400 ms on losses, lower it when calm (the Sharp applies it: 180 ms forced at 100, 500 ms at 400)
 - [x] Test on a Nest Hub: takes 1080p and scales it to its 1280x720 screen, no adaptive delay. In HLS it plays 720p and refuses 1080p, with a clear message
 
 To do:
@@ -23,7 +23,6 @@ To do:
 - [ ] Test on the school Chromecast
 - [ ] Test the HLS fallback on a device without mirroring
 - [ ] Test with a firewall on (ufw, firewalld)
-- [ ] Check that the TV applies the adaptive playout delay (the Sharp accepts it, still reports 100 ms)
 - [ ] Tune the bitrate and delay steps on a lossy network
 - [ ] Read `rtt_ms` on the school Chromecast (TCP connect took 170 to 500 ms there): delay steps may need to go above 400 ms
 - [ ] Measure the lip sync

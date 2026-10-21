@@ -38,7 +38,8 @@ error.
   key frame, at most every 2 s, and down one step after 30 s without
   trouble. It travels in an RTP extension on the first packet of each frame,
   the same on both streams, if the ANSWER accepts `adaptive_playout_delay`.
-  Otherwise it stays at 100 ms.
+  Otherwise it stays at 100 ms. The Sharp applies it (stopwatch photos
+  below), though its feedback keeps reporting the OFFER's 100 ms.
 - A session is lost when the control connection drops, the TV closes it, or
   no RTCP comes for 5 s (10 s before the first). sccast then launches the
   mirroring receiver again and sends a new OFFER: up to 3 times in 5 min
@@ -68,6 +69,8 @@ only reads files.
 | Ctrl+C, `s`, `q`, closing the terminal | TV freed |
 | TV network cut for 20 s (2026-10-21) | "Reconnecting" shown, stream back once plugged in |
 | Still screen for 30 s (2026-10-21) | no reconnection |
+| Delay with the extension forced at 100 ms (stopwatch photo) | about 180 ms |
+| Delay with the extension forced at 400 ms (2 photos) | about 500 and 520 ms |
 | Resent packets, 5 % loss with `tc netem` on the PC | 12 to 16 per second |
 | Resent packets after removing it | 3 to 5 per second |
 | Wi-Fi loss bursts of 8 to 11 % without netem | delay up to 400 ms, bitrate down to 1280 kbit/s, back up when calm |
@@ -81,7 +84,3 @@ only reads files.
   checked on the Sharp and one Nest Hub only.
 - Lip sync measure (the user saw maybe a slight offset).
 - Tuning: delay and bitrate steps are guesses (delay steps from CastMirror).
-- Adaptive playout delay: the Sharp accepts the extension (2026-10-21), but
-  its feedback kept reporting 100 ms for 30 s after sccast asked for
-  200 ms. Not known yet whether it ignores the value or the field does not
-  show it.

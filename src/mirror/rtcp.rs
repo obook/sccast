@@ -12,9 +12,9 @@
 pub enum Feedback {
     KeyFrame { ssrc: u32 },
     Lost { ssrc: u32, frame: u8, packet: u16, bits: u8 },
-    /// Every frame up to `frame` (truncated to 8 bits) arrived whole. `delay_ms`: the playout
-    /// delay the receiver applies.
-    Ack { ssrc: u32, frame: u8, delay_ms: u16 },
+    /// Every frame up to `frame` (truncated to 8 bits) arrived whole. The playout delay next to
+    /// it is not read: the Sharp keeps reporting the OFFER's, even when it applies another.
+    Ack { ssrc: u32, frame: u8 },
     /// Receiver Report block. `fraction`: share of packets lost since the last report, out of 256.
     /// `last_sr`: middle 32 bits of the NTP time of the last Sender Report received, 0 if none.
     /// `since_sr`: time since that report, in 1/65536 s.
@@ -49,8 +49,7 @@ pub fn parse_rtcp(buf: &[u8]) -> Vec<Feedback> {
             (206, 1) => found.extend(word(body, 4).map(|ssrc| Feedback::KeyFrame { ssrc })),
             (206, 15) if body.get(8..12) == Some(b"CAST") && body.len() >= 16 => {
                 let Some(ssrc) = word(body, 4) else { continue };
-                let delay_ms = u16::from_be_bytes([body[14], body[15]]);
-                found.push(Feedback::Ack { ssrc, frame: body[12], delay_ms });
+                found.push(Feedback::Ack { ssrc, frame: body[12] });
                 for loss in body[16..].chunks_exact(4).take(usize::from(body[13])) {
                     let packet = u16::from_be_bytes([loss[1], loss[2]]);
                     found.push(Feedback::Lost { ssrc, frame: loss[0], packet, bits: loss[3] });
@@ -91,7 +90,7 @@ mod tests {
             vec![
                 Feedback::Report { ssrc: SSRC, fraction: 12, last_sr: 0x1234_5678, since_sr: 0x0001_0000 },
                 Feedback::KeyFrame { ssrc: SSRC },
-                Feedback::Ack { ssrc: SSRC, frame: 4, delay_ms: 100 },
+                Feedback::Ack { ssrc: SSRC, frame: 4 },
                 Feedback::Lost { ssrc: SSRC, frame: 5, packet: 3, bits: 0b10 },
             ]
         );

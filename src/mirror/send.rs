@@ -74,8 +74,6 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
         let mut logged = Instant::now();
         let started = Instant::now();
         let mut heard: Option<Instant> = None;
-        // Delay the TV reports applying, to check it follows ours.
-        let mut tv_delay_ms: Option<u16> = None;
         let mut delay = Delay::new(started);
         let adaptive = session.video.lock().unwrap().playout_delay.is_some();
         let mut retarget = |trouble: bool| {
@@ -97,7 +95,7 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
             }
             if logged.elapsed() >= Duration::from_secs(10) {
                 let rtt_ms = session.video.lock().unwrap().rtt.map(|rtt| rtt.as_millis());
-                tracing::info!(resent, key_frames, kbps = rate.current, ?rtt_ms, ?tv_delay_ms, "mirroring");
+                tracing::info!(resent, key_frames, kbps = rate.current, ?rtt_ms, "mirroring");
                 logged = Instant::now();
             }
             // Errors are timeouts, or ICMP refusals once the receiver is gone.
@@ -130,10 +128,7 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
                             key_frames += 1;
                         }
                     }
-                    Feedback::Ack { ssrc, frame, delay_ms } => {
-                        if ssrc == VIDEO_SSRC {
-                            tv_delay_ms = Some(delay_ms);
-                        }
+                    Feedback::Ack { ssrc, frame } => {
                         if let Some(stream) = session.stream(ssrc) {
                             stream.lock().unwrap().acked(frame);
                         }
