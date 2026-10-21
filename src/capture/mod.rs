@@ -1,13 +1,14 @@
 //! capture/
-//! Everything on the PC side: the screen chosen through the portal (portal.rs), and the
-//! GStreamer pipeline that captures it with the sound and encodes it (encode.rs describes it,
-//! this file runs and watches it).
+//! Everything on the PC side: the screen chosen through the portal (portal.rs), the pointer
+//! for touchback (input.rs), and the GStreamer pipeline that captures the screen with the
+//! sound and encodes it (encode.rs describes it, this file runs and watches it).
 //!
 //! Author: O. Booklage
 //! Date: October 2026
 //! Licence: MIT
 
 mod encode;
+mod input;
 mod portal;
 
 use std::path::Path;
@@ -23,7 +24,8 @@ use tempfile::TempDir;
 
 use crate::cli::{Format, Stream};
 pub use encode::{MKV, PLAYLIST};
-pub use portal::{Input, ScreenCast};
+pub use input::Input;
+pub use portal::ScreenCast;
 
 /// Segments to wait for before casting: the window must already be twice the receiver's
 /// 3-segment hold-back, or it starts at the window edge and stalls until the playlist grows.

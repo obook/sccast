@@ -194,11 +194,16 @@ panel scales touches to the video size sent in the cast request.
 Unknown: which pair (`x, y` or `pointX, pointY`) carries them. The Windows client also sends a UDP beat (type 3, id 81)
 to the panel; where to is unclear, so sccast does not send it.
 
-In sccast: the Touchback setting (menu row, or `--touchback`) makes the
-screen dialog also grant the pointer (RemoteDesktop portal on the same
-session as the capture). The touches then move the pointer to the matching
-point of the shared screen, black bands of the video left out, and press
-the buttons; the wheel moves one notch per event, its direction taken from
+In sccast: the Touchback setting (menu row, or `--touchback`) opens a
+second portal session after the screen dialog: a RemoteDesktop session,
+for which KDE asks to allow remote control. It is not used for the
+capture: KDE's RemoteDesktop dialog lets the user pick no screen, and with
+three monitors the whole workspace was cast once. Absolute pointer motion
+needs a stream of that session, so sccast takes the one that contains the
+shared monitor (one per monitor, or the whole workspace, both handled) and
+adds the monitor's offset in it. A shared window turns touchback off. The
+touches then move the pointer to the matching point of the shared screen,
+black bands of the video left out, and press the buttons; the wheel moves one notch per event, its direction taken from
 the sign of `y` (hypothesis). With the setting off, sccast refuses the
 panel's request (`resultType` -100), so the panel can say so.
 
