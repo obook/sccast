@@ -37,25 +37,33 @@ pub struct Commands {
 }
 
 /// Connect to the panel at `host`; if its port does not answer, try the other command ports
-/// of the code table (a code read wrong, or a panel set another way).
-fn reach(host: SocketAddr) -> anyhow::Result<TcpStream> {
+/// of the code table (a code read wrong, or a panel set another way). Returns the address
+/// that answered.
+pub fn reach(host: SocketAddr) -> anyhow::Result<(TcpStream, SocketAddr)> {
     let ports = std::iter::once(host.port()).chain(PORTS.into_iter().filter(|p| *p != host.port()));
     let mut failures = Vec::new();
     for port in ports {
         let address = SocketAddr::new(host.ip(), port);
-        match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
+        let e = match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
             Ok(socket) => {
                 trace::line(&format!("connected to {address}"));
-                return Ok(socket);
+                return Ok((socket, address));
             }
-            Err(e) => {
-                trace::line(&format!("cannot connect to {address}: {}", cause(&e)));
-                failures.push(format!("{port}: {}", if e.kind() == io::ErrorKind::TimedOut { "no answer" } else { "refused" }));
-            }
+            Err(e) => e,
+        };
+        trace::line(&format!("cannot connect to {address}: {}", cause(&e)));
+        match e.kind() {
+            // No machine answers at this address: other ports will not help.
+            io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable => anyhow::bail!(
+                "no machine answers at {}: the code is wrong, the panel is off, or it is on another network",
+                host.ip()
+            ),
+            io::ErrorKind::ConnectionRefused => failures.push(format!("{port}: refused")),
+            _ => failures.push(format!("{port}: no answer")),
         }
     }
     anyhow::bail!(
-        "cannot reach the panel at {} (ports {}). Is it on, on the same network, and is the code right?",
+        "the machine at {} does not take a cast on ports {}. Is it the panel, and is the code right?",
         host.ip(),
         failures.join(", ")
     )
@@ -63,7 +71,7 @@ fn reach(host: SocketAddr) -> anyhow::Result<TcpStream> {
 
 impl Commands {
     pub fn open(host: SocketAddr) -> anyhow::Result<Self> {
-        let socket = reach(host)?;
+        let (socket, _) = reach(host)?;
         socket.set_nodelay(true)?;
         // A heartbeat must not block on a dead link.
         socket.set_write_timeout(Some(ANSWER_TIMEOUT))?;

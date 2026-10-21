@@ -50,6 +50,11 @@ const SILENCE: Duration = Duration::from_secs(30);
 const BUSY_RETRY: Duration = Duration::from_secs(5);
 const BUSY_WAIT: Duration = Duration::from_secs(35);
 
+/// Check that the panel answers; return the address that did (one of the code table's ports).
+pub fn find(host: SocketAddr) -> anyhow::Result<SocketAddr> {
+    commands::reach(host).map(|(_, address)| address)
+}
+
 /// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again; after a
 /// refusal, stop.
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {

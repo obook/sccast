@@ -80,6 +80,8 @@ fn main() -> anyhow::Result<()> {
                     (None, Some(code)) => screenshare::pin::decode(code).map_err(anyhow::Error::msg)?.into(),
                     (None, None) => bail!("--format screenshare needs --pin CODE, --host IP:PORT or --device NAME"),
                 };
+                // Before the screen dialog: a wrong code fails in seconds, without a click.
+                let host = spin(&format!("Looking for the panel at {}...", host.ip()), || screenshare::find(host))?;
                 let screen = capture::ScreenCast::open(settings.touchback)?;
                 return screenshare::cast(host, &host.to_string(), &settings, &screen, stop_flag()?, &Out::Term);
             }
