@@ -102,7 +102,7 @@ impl Commands {
         let (mut shown, mut hinted) = (None, false);
         while !stop.load(Ordering::SeqCst) {
             let Some(left) = (started + APPROVAL_TIMEOUT).checked_duration_since(Instant::now()) else {
-                return Err(Refused("no answer from the panel in 90 s (nobody allowed the cast?)".into()).into());
+                return Err(Refused::new("no answer from the panel in 90 s (nobody allowed the cast?)").into());
             };
             if shown != Some(left.as_secs()) {
                 shown = Some(left.as_secs());

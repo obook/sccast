@@ -44,15 +44,18 @@ const KEY_FRAME: (i32, i32) = (6, 113);
 const INDEX_VERSION: i32 = 63;
 /// The Android sender sends a heartbeat after 3 s without writing.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
-/// The Android sender gives up after three read timeouts of 10 s.
+/// The Android sender gives up after three read timeouts of 10 s, the Windows client after 30 s.
 const SILENCE: Duration = Duration::from_secs(30);
+/// While the panel still holds the lost session: a try every 5 s, for a bit more than its 30 s.
+const BUSY_RETRY: Duration = Duration::from_secs(5);
+const BUSY_WAIT: Duration = Duration::from_secs(35);
 
 /// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again; after a
 /// refusal, stop.
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     trace::line(&format!("sccast {} casting to {name} at {host}, {:?}", env!("CARGO_PKG_VERSION"), s.stream.resolution));
     // A first failure is a wrong address or a refusal: report it.
-    let mut why = session(host, name, s, screen, stop, out).inspect_err(|e| trace::line(&format!("failed: {e:#}")))?;
+    let mut why = attempt(host, name, s, screen, stop, out)?;
     // Up to 3 times in 5 min from the terminal, without limit from the menu, as mirror.
     let mut drops = crate::device::Drops::new(matches!(out, Out::Menu(_)));
     while let Some(lost) = why {
@@ -65,15 +68,28 @@ pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, sto
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        why = match session(host, name, s, screen, stop, out) {
-            Err(e) if e.is::<Refused>() => {
-                trace::line(&format!("failed: {e:#}"));
-                return Err(e);
-            }
+        why = match attempt(host, name, s, screen, stop, out) {
+            Err(e) if e.is::<Refused>() => return Err(e),
             other => other.unwrap_or_else(|e| Some(format!("{e:#}"))),
         };
     }
     Ok(())
+}
+
+/// A session, tried again every 5 s for 35 s while the panel still holds the previous one:
+/// it drops a lost session only after its own 30 s without news (Windows client).
+fn attempt(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<Option<String>> {
+    let started = Instant::now();
+    loop {
+        match session(host, name, s, screen, stop, out) {
+            Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.retry) && started.elapsed() < BUSY_WAIT && !stop.load(Ordering::SeqCst) => {
+                trace::line(&format!("{e:#}: trying again in 5 s"));
+                out.say(&format!("{name} still holds the previous session: trying again in 5 s..."));
+                std::thread::sleep(BUSY_RETRY);
+            }
+            other => return other.inspect_err(|e| trace::line(&format!("failed: {e:#}"))),
+        }
+    }
 }
 
 /// One session: Ok(None) at `stop` or when the panel ends the cast, Ok(Some(why)) when it is lost.
@@ -168,12 +184,16 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
     Ok(lost)
 }
 
-/// Connect request, with the fields the Android sender fills. Which ones the panel needs is unverified.
+/// Connect request, with the fields the Windows client fills (keys from its builder; both
+/// spellings of the code appear there). Which ones the panel needs is unverified. Hypothesis:
+/// deviceType 5, written by the Windows client, stands for a PC (the Android sender writes 1).
+/// The device id stays the same across reconnections (machine-id).
 fn connect_request(pin: Option<&str>, local_ip: std::net::IpAddr) -> Value {
     let read = |path| std::fs::read_to_string(path).map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty());
     let name = read("/etc/hostname").unwrap_or_else(|| "sccast".to_string());
     let uuid = read("/etc/machine-id").unwrap_or_else(|| name.clone());
-    json!({"deviceName": name, "deviceType": 1, "pinCode": pin.unwrap_or(""), "connectType": 0,
-        "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "functions": [],
-        "originIp": local_ip.to_string(), "systemName": "Linux"})
+    let pin = pin.unwrap_or("");
+    json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": 5, "connectType": 0,
+        "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "originIp": local_ip.to_string(),
+        "supportMultiTouch": false, "supportPen": false, "functions": [], "systemName": "Linux"})
 }

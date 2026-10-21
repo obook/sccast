@@ -93,9 +93,23 @@ A person may have to allow the sender on the panel (a dialog, sometimes a
 code shown on the panel). In the menu, Enter on a panel asks for that code;
 sccast sends it as `pinCode` (hypothesis: the field takes the code as
 typed). sccast waits up to 90 s for each answer, with a countdown. A refusal
-or no answer ends the cast without reconnecting. Cast answer codes, from the
+or no answer ends the cast without reconnecting. Answer codes, from the
 Android sender's action names: -100 failure, -101 too many devices, -102
-refused, -103 panel not ready. The panel's own texts are not decoded.
+refused, -103 panel not ready; from the Windows client's error table
+(`bsprotocol.dll`): -7 session not found, -8 refused by the user, -9 a
+session with this id already exists, -10 taken by another sender, -11 too
+many casts on the panel, -12 session disconnected, -13 too many casts from
+this sender. On -9 and -12 sccast tries again every 5 s for 35 s: the panel
+drops a lost session only after 30 s without news (Windows client's
+timeout, hypothesis for the panel).
+
+Connect request as the Windows client builds it: `pincode` and `pinCode`
+(both spellings appear; sccast sends the code typed), `deviceName`,
+`platform` (values not decoded, not sent), `deviceType` (the Windows client
+writes 5; sccast too, hypothesis: a PC), `connectType`, `deviceVersion`,
+`deviceUuid` (the same across reconnections), `originIp`,
+`supportMultiTouch`, `supportPen`. Answer keys: `resultType`, `failReason`,
+`receiverType`, `receiverName`, `maxWindowCount`.
 
 Test on site. `sccast pin CODE` prints the address a code gives, without
 connecting, to compare with the panel's network settings. Each panel cast
