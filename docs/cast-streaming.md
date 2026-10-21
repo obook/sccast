@@ -58,6 +58,9 @@ only reads files.
 | Ctrl+C, `s`, `q`, closing the terminal | TV freed |
 | TV network cut for 20 s (2026-10-21) | "Reconnecting" shown, stream back once plugged in |
 | Still screen for 30 s (2026-10-21) | no reconnection |
+| Resent packets, 5 % loss with `tc netem` on the PC | 12 to 16 per second |
+| Resent packets after removing it | 3 to 5 per second |
+| Wi-Fi loss bursts of 8 to 11 % without netem | delay up to 400 ms, bitrate down to 1280 kbit/s, back up when calm |
 
 ## Not done
 
