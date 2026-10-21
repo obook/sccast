@@ -27,7 +27,7 @@ use crate::capture::{request_key_frame, Capture, ScreenCast};
 use crate::menu::{Settings, Status};
 use crate::session::Out;
 use approval::{Refused, APPROVAL_TIMEOUT};
-use commands::{Commands, ANSWER_TIMEOUT, CAST_STOPPED, DISCONNECTED};
+use commands::{Commands, CAST_STOPPED, DISCONNECTED};
 use media::send_frames;
 
 /// (commandType, commandId) pairs, from the sender's ProtocolConstant (more in commands.rs).
@@ -123,8 +123,8 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
     approval::check("cast", &answer)?;
     out.say(&format!("Casting to {name}"));
     let port = |key: &str| answer[key].as_u64().and_then(|p| u16::try_from(p).ok()).with_context(|| format!("no {key} in {answer}"));
-    let video_socket = media::connect(host, port("videoPort")?, ANSWER_TIMEOUT)?;
-    let audio_socket = if s.stream.no_audio { None } else { Some(media::connect(host, port("audioPort")?, ANSWER_TIMEOUT)?) };
+    let video_socket = media::connect(host, port("videoPort")?)?;
+    let audio_socket = if s.stream.no_audio { None } else { Some(media::connect(host, port("audioPort")?)?) };
 
     // A new capture starts with a key frame, after a reconnection too.
     let capture = Capture::start(Some(screen), &s.stream, s.audio_delay)?;

@@ -20,6 +20,7 @@ use anyhow::Context;
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
+use super::commands::ANSWER_TIMEOUT;
 use super::wire::{media_frame, split_config};
 use crate::capture::{request_key_frame, Capture};
 use crate::mirror::rate::{Rate, LOSS_LIMIT};
@@ -61,9 +62,9 @@ pub fn cause(e: &io::Error) -> String {
 }
 
 /// Connect to `port` on the panel, with a small send buffer, non-blocking.
-pub fn connect(host: SocketAddr, port: u16, timeout: Duration) -> anyhow::Result<TcpStream> {
+pub fn connect(host: SocketAddr, port: u16) -> anyhow::Result<TcpStream> {
     let address = SocketAddr::new(host.ip(), port);
-    let socket = TcpStream::connect_timeout(&address, timeout).with_context(|| format!("cannot reach {address}"))?;
+    let socket = TcpStream::connect_timeout(&address, ANSWER_TIMEOUT).with_context(|| format!("cannot reach {address}"))?;
     socket.set_nodelay(true)?;
     socket2::SockRef::from(&socket).set_send_buffer_size(SEND_BUFFER)?;
     socket.set_nonblocking(true)?;
