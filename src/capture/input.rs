@@ -37,9 +37,12 @@ pub struct Input {
 /// The stream of `streams` (node, rectangle) that contains `monitor`, and the monitor's offset in it.
 fn containing(monitor: Rect, streams: &[(u32, Rect)]) -> Option<(u32, (f64, f64))> {
     let ((x, y), (width, height)) = monitor;
+    let holds_monitor = |((left, top), (stream_width, stream_height)): &Rect| {
+        x >= *left && y >= *top && x + width <= left + stream_width && y + height <= top + stream_height
+    };
     streams
         .iter()
-        .find(|(_, ((left, top), (w, h)))| x >= *left && y >= *top && x + width <= left + w && y + height <= top + h)
+        .find(|(_, rect)| holds_monitor(rect))
         .map(|(node, ((left, top), _))| (*node, (f64::from(x - left), f64::from(y - top))))
 }
 
@@ -59,7 +62,8 @@ impl Input {
             let started = proxy.start(&session, None, Default::default()).await?.response()?;
             ashpd::Result::Ok((proxy, session, started))
         };
-        let (proxy, session, started) = opened.await.inspect_err(|e| tracing::warn!("no RemoteDesktop portal, touchback off: {e}")).ok()?;
+        let opened = opened.await.inspect_err(|e| tracing::warn!("no RemoteDesktop portal, touchback off: {e}"));
+        let (proxy, session, started) = opened.ok()?;
         describe("pointer", started.streams());
         if !started.devices().contains(DeviceType::Pointer) {
             tracing::warn!("the desktop did not grant the pointer: touchback off");
@@ -98,7 +102,8 @@ impl Input {
 
     /// Scroll by `steps` wheel notches, down when positive.
     pub fn wheel(&self, steps: i32) {
-        let sent = runtime().block_on(self.proxy.notify_pointer_axis_discrete(&self.session, Axis::Vertical, steps, Default::default()));
+        let scroll = self.proxy.notify_pointer_axis_discrete(&self.session, Axis::Vertical, steps, Default::default());
+        let sent = runtime().block_on(scroll);
         log_failure(sent);
     }
 }
