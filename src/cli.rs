@@ -38,7 +38,7 @@ pub enum Command {
         #[arg(long)]
         file: Option<PathBuf>,
         /// Delay the sound by this many milliseconds, if it comes before the image on the TV.
-        /// The menu changes it during a cast.
+        /// The menu changes it during a cast in screen mirroring, at the next cast in HLS.
         #[arg(long, default_value_t = 0)]
         audio_delay: u64,
         /// Receiver app id. Default: sccast's own (2-3 s of delay), falling back to Google's

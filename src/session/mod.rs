@@ -114,9 +114,7 @@ pub fn cast_screen(
     let stream = &s.stream;
     let ip = hls::lan_ip(device.ip.into())?;
     let hls = Capture::start(Some(screen), stream, s.audio_delay)?;
-    if let Some(pad) = hls.audio_pad() {
-        out.send(menu::Status::AudioPad(pad));
-    }
+    // No live audio delay in HLS: the jump in the segments' sound made the Sharp buffer.
     let (path, content_type, server) = serve(&hls, stream, stop)?;
     if stream.format == cli::Format::Hls {
         out.send(menu::Status::Segments(hls.dir().to_path_buf()));

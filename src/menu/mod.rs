@@ -163,10 +163,14 @@ impl Menu {
         let row = self.row.selected().unwrap_or(0);
         self.chosen_resolution = None;
         change(s, row, dir);
-        if row == AUDIO_DELAY_ROW {
-            if let Some(pad) = &self.audio_pad {
-                crate::capture::set_audio_delay(pad, s.audio_delay);
-                tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
+        if row == AUDIO_DELAY_ROW && self.casting.is_some() {
+            match &self.audio_pad {
+                Some(pad) => {
+                    crate::capture::set_audio_delay(pad, s.audio_delay);
+                    tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
+                }
+                // HLS: only screen mirroring takes it live.
+                None => self.status = Status::Info("Audio delay: applies at the next cast".into()),
             }
         }
     }
