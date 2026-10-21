@@ -21,6 +21,9 @@ clap = { version = "4.6.7", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
 futures-core = "0.3.34"
 gstreamer = "0.25.4"
+# Already pulled by other crates: dup2, to send what libraries print on stderr to the log
+# while the menu owns the terminal.
+libc = "0.2.190"
 mdns-sd = "0.21.5"
 ratatui = "0.30.2"
 # thread_safe: the launch runs in a thread, so it can be given up after a timeout.

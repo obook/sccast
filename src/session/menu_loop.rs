@@ -28,7 +28,10 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
         let _ = crate::MENU_LOG.set(file);
     }
     let mut terminal = ratatui::init();
+    let stderr_to_log = crate::MENU_LOG.get().and_then(|file| super::terminal::StderrToFile::new(file).ok());
     let result = drive_menu(&mut terminal, &mut settings, screen, quit);
+    // Stderr back first: a final error must reach the user.
+    drop(stderr_to_log);
     // Not restore(): its eprintln! panics when the terminal was closed.
     let _ = ratatui::try_restore();
     result

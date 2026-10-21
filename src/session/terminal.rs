@@ -1,12 +1,14 @@
 //! terminal.rs
-//! Helpers for the command line without the menu: a spinner while a step runs, the choice
-//! of the device, and the Ctrl+C / SIGTERM flag.
+//! Terminal helpers: a spinner while a step runs, the choice of the device, the Ctrl+C /
+//! SIGTERM flag, and stderr sent to the log while the menu draws.
 //!
 //! Author: O. Booklage
 //! Date: October 2026
 //! Licence: MIT
 
+use std::fs::File;
 use std::io::{IsTerminal, Write};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -16,6 +18,32 @@ use crate::device::{discovery, CastDevice};
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 pub const SEARCHING: &str = "Searching for Chromecast devices, please wait...";
+const STDERR: i32 = 2;
+
+/// While it lives, what libraries print on stderr (a GStreamer plugin's "Xlib: extension
+/// missing", a panic) goes to a file instead of over the menu, which only redraws the cells
+/// it changed. Dropping it gives stderr back.
+pub struct StderrToFile {
+    saved: OwnedFd,
+}
+
+impl StderrToFile {
+    pub fn new(file: &File) -> std::io::Result<Self> {
+        let saved = std::io::stderr().as_fd().try_clone_to_owned()?;
+        // SAFETY: both descriptors are open; dup2 only replaces descriptor 2.
+        if unsafe { libc::dup2(file.as_raw_fd(), STDERR) } < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self { saved })
+    }
+}
+
+impl Drop for StderrToFile {
+    fn drop(&mut self) {
+        // SAFETY: `saved` is the original stderr, still open.
+        unsafe { libc::dup2(self.saved.as_raw_fd(), STDERR) };
+    }
+}
 
 /// Flag set by Ctrl+C or SIGTERM. The handler can be installed only once per process.
 pub fn stop_flag() -> anyhow::Result<&'static AtomicBool> {
@@ -78,5 +106,21 @@ pub fn pick_device(query: Option<&str>) -> anyhow::Result<CastDevice> {
     match answer.trim().parse::<usize>() {
         Ok(n) if (1..=devices.len()).contains(&n) => Ok(devices.swap_remove(n - 1)),
         _ => bail!("no device chosen"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sends_stderr_to_a_file() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        {
+            let _redirect = StderrToFile::new(log.as_file()).unwrap();
+            // Written to descriptor 2 itself, as a C library does.
+            std::io::stderr().write_all(b"Xlib: extension missing\n").unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(log.path()).unwrap(), "Xlib: extension missing\n");
     }
 }

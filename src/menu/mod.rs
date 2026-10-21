@@ -105,6 +105,8 @@ pub struct Menu {
     audio_pad: Option<gstreamer::Pad>,
     /// Panel whose code is being typed (None: a panel not in the list, `c`), and the code so far.
     code_entry: Option<(Option<CastDevice>, String)>,
+    /// Redraw every cell at the next frame, not only the changed ones.
+    redraw_all: bool,
 }
 
 impl Menu {
@@ -135,6 +137,7 @@ impl Menu {
             chosen_resolution: None,
             audio_pad: None,
             code_entry: None,
+            redraw_all: false,
         }
     }
 
@@ -161,7 +164,11 @@ impl Menu {
             Status::Reconnecting => self.live.reconnects += 1,
             Status::Segments(dir) => self.live.segments = Some(dir),
             Status::Served(counter) => self.live.served = Some((counter, None)),
-            Status::Dropped(counter) => self.live.dropped = Some(counter),
+            Status::Dropped(counter) => {
+                self.live.dropped = Some(counter);
+                // Sent right after the capture starts, when plugins may have printed over the menu.
+                self.redraw_all = true;
+            }
             Status::NetworkDropped(counter) => self.live.network_dropped = Some(counter),
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
             // Handled in next(), which holds the settings.
@@ -271,6 +278,9 @@ impl Menu {
             }
             if self.live.started.is_some() {
                 self.live.sample();
+            }
+            if std::mem::take(&mut self.redraw_all) {
+                terminal.clear()?;
             }
             terminal.draw(|f| self.draw(f, s))?;
             self.tick += 1;

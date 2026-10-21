@@ -2238,6 +2238,7 @@ dependencies = [
  "ctrlc",
  "futures-core",
  "gstreamer",
+ "libc",
  "mdns-sd",
  "ratatui",
  "rust_cast",
