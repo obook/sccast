@@ -83,6 +83,14 @@ Ids (`com/seewo/easiair/protocol/ProtocolConstant.java`):
 5. The sender opens one TCP connection to `videoPort` and one to `audioPort`
    on the same host, with TCP_NODELAY.
 
+A person may have to allow the sender on the panel (a dialog, sometimes a
+code shown on the panel). In the menu, Enter on a panel asks for that code;
+sccast sends it as `pinCode` (hypothesis: the field takes the code as
+typed). sccast waits up to 90 s for each answer, with a countdown. A refusal
+or no answer ends the cast without reconnecting. Cast answer codes, from the
+Android sender's action names: -100 failure, -101 too many devices, -102
+refused, -103 panel not ready. The panel's own texts are not decoded.
+
 Heartbeat (`com/seewo/swstclient/module/network/codec/b.java`): after 3 s
 without writing, the sender sends one. After 10 s without reading it sends
 one too. After two such silences it gives up.

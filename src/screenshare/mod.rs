@@ -7,25 +7,26 @@
 //! Date: October 2026
 //! Licence: MIT
 
+mod approval;
+mod media;
 mod touch;
 mod wire;
 
 use std::io;
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
-use std::thread::JoinHandle;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Context};
-use gstreamer as gst;
-use gstreamer::prelude::*;
+use anyhow::Context;
 use serde_json::{json, Value};
 
 use crate::capture::{request_key_frame, Capture, ScreenCast};
-use crate::menu::Settings;
+use crate::menu::{Settings, Status};
 use crate::session::Out;
-use wire::{media_frame, read_message, split_config, write_message, ScreenshareMessage};
+use approval::{Refused, APPROVAL_TIMEOUT};
+use media::send_frames;
+use wire::{read_message, write_message, ScreenshareMessage};
 
 /// (commandType, commandId) pairs, from the sender's ProtocolConstant.
 const HEARTBEAT: (i32, i32) = (0, 0);
@@ -43,6 +44,7 @@ const INDEX_VERSION: i32 = 63;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
 /// Twice the sender's 10 s read timeout: the panel is gone.
 const SILENCE: Duration = Duration::from_secs(20);
+/// TCP connections and writes; the answers wait for a person (approval.rs).
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Command channel: writes here, a thread reads into `incoming`.
@@ -79,16 +81,29 @@ impl Commands {
         write_message(&mut self.socket, &ScreenshareMessage { version: 1, command_type, command_id, sequence, timestamp, payload })
     }
 
-    /// Wait for `wanted`; return its version and JSON payload.
-    fn wait(&self, wanted: (i32, i32)) -> anyhow::Result<(i32, Value)> {
-        let deadline = Instant::now() + ANSWER_TIMEOUT;
-        loop {
-            let m = self.incoming.recv_timeout(deadline.saturating_duration_since(Instant::now())).context("no answer from the panel")??;
+    /// Wait for `wanted`, as long as someone may take to allow it on the panel; return its
+    /// version and JSON payload. None at `stop`. `countdown` gets the seconds left, once a second.
+    fn wait(&self, wanted: (i32, i32), stop: &AtomicBool, countdown: &dyn Fn(u64)) -> anyhow::Result<Option<(i32, Value)>> {
+        let deadline = Instant::now() + APPROVAL_TIMEOUT;
+        let mut shown = None;
+        while !stop.load(Ordering::SeqCst) {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return Err(Refused("no answer from the panel in 90 s (nobody allowed the cast?)".into()).into());
+            };
+            if shown != Some(left.as_secs()) {
+                shown = Some(left.as_secs());
+                countdown(left.as_secs() + 1);
+            }
+            let m = match self.incoming.recv_timeout(Duration::from_millis(200)) {
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                other => other.context("the panel closed the connection")??,
+            };
             tracing::debug!(t = m.command_type, id = m.command_id, payload = %m.payload, "panel message");
             if (m.command_type, m.command_id) == wanted {
-                return Ok((m.version, serde_json::from_str(&m.payload).unwrap_or(Value::Null)));
+                return Ok(Some((m.version, serde_json::from_str(&m.payload).unwrap_or(Value::Null))));
             }
         }
+        Ok(None)
     }
 }
 
@@ -96,53 +111,70 @@ fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-/// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again.
-pub fn cast(host: SocketAddr, pin: Option<&str>, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
+/// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again; after a
+/// refusal, stop.
+pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     // A first failure is a wrong address or a refusal: report it.
-    let mut why = out.step(&format!("Connecting to the panel {host}..."), || session(host, pin, s, screen, stop))?;
+    let mut why = session(host, name, s, screen, stop, out)?;
     while let Some(lost) = why {
         tracing::warn!(%lost, "panel lost");
+        out.report(crate::device::Report::Reconnecting);
         out.say(&format!("Lost the panel ({lost}). Reconnecting..."));
         std::thread::sleep(crate::device::RECONNECT_DELAY);
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        why = session(host, pin, s, screen, stop).unwrap_or_else(|e| Some(format!("{e:#}")));
+        why = match session(host, name, s, screen, stop, out) {
+            Err(e) if e.is::<Refused>() => return Err(e),
+            other => other.unwrap_or_else(|e| Some(format!("{e:#}"))),
+        };
     }
     Ok(())
 }
 
 /// One session: Ok(None) at `stop` or when the panel ends the cast, Ok(Some(why)) when it is lost.
-fn session(host: SocketAddr, pin: Option<&str>, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool) -> anyhow::Result<Option<String>> {
+fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<Option<String>> {
     let mut commands = Commands::open(host)?;
     let local_ip = commands.socket.local_addr()?.ip();
-    commands.send(CONNECT, &connect_request(pin, local_ip))?;
-    let (_, answer) = commands.wait(CONNECTED)?;
-    if answer["resultType"] != 1 {
-        bail!("the panel refused the connection: {answer}");
-    }
+    commands.send(CONNECT, &connect_request(s.pin.as_deref(), local_ip))?;
+    tracing::info!(%host, "waiting for approval on the panel");
+    // The menu counts down; the terminal says it once per wait.
+    let countdown = |left: u64| {
+        if matches!(out, Out::Menu(_)) || left == APPROVAL_TIMEOUT.as_secs() {
+            out.say(&format!("Click Allow on the panel {name} ({left} s)..."));
+        }
+    };
+    let Some((_, answer)) = commands.wait(CONNECTED, stop, &countdown)? else { return Ok(None) };
+    approval::check("connection", &answer)?;
     let (width, height) = s.stream.resolution;
     let audio = json!({"codec": 11, "sampleRate": 44100, "channel": 2, "bitDepth": 16, "samplePerPacket": 1024, "adtsEnabled": true});
     let request = json!({"authorizeMode": 0, "castMode": 0, "displayMode": 0, "supportAudio": !s.stream.no_audio,
         "audio": audio, "video": {"width": width, "height": height}});
     commands.send(CAST, &request)?;
-    let (version, answer) = commands.wait(CAST_ANSWER)?;
+    let Some((version, answer)) = commands.wait(CAST_ANSWER, stop, &countdown)? else { return Ok(None) };
     tracing::info!(version, %answer, "cast answer");
-    if answer["resultType"] != 1 {
-        bail!("the panel refused the cast: {answer}");
-    }
+    approval::check("cast", &answer)?;
+    out.say(&format!("Casting to {name}"));
     let port = |key: &str| answer[key].as_u64().and_then(|p| u16::try_from(p).ok()).with_context(|| format!("no {key} in {answer}"));
-    let video_socket = media_socket(host, port("videoPort")?)?;
-    let audio_socket = if s.stream.no_audio { None } else { Some(media_socket(host, port("audioPort")?)?) };
+    let video_socket = media::connect(host, port("videoPort")?, ANSWER_TIMEOUT)?;
+    let audio_socket = if s.stream.no_audio { None } else { Some(media::connect(host, port("audioPort")?, ANSWER_TIMEOUT)?) };
 
     let capture = Capture::start(Some(screen), &s.stream, s.audio_delay)?;
     let encoder = capture.element("venc").context("no encoder in the pipeline")?;
     // ponytail: leaks one flag per session (a byte), as mirror does: the threads want a 'static flag.
     let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
     let index = (version >= INDEX_VERSION).then_some(0);
-    let mut senders = vec![send_frames(&capture, "sink", video_socket, index, ended)?];
+    // Live panel of the menu: bytes sent (bitrate), frames dropped, audio delay during the cast.
+    let sent = Arc::new(AtomicU64::new(0));
+    let counted = Arc::clone(&sent);
+    out.send(Status::Served(Box::new(move || counted.load(Ordering::Relaxed))));
+    out.send(Status::Dropped(Arc::clone(&capture.dropped)));
+    if let Some(pad) = capture.audio_pad() {
+        out.send(Status::AudioPad(pad));
+    }
+    let mut senders = vec![send_frames(&capture, "sink", video_socket, index, &sent, ended)?];
     if let Some(socket) = audio_socket {
-        senders.push(send_frames(&capture, "asink", socket, None, ended)?);
+        senders.push(send_frames(&capture, "asink", socket, None, &sent, ended)?);
     }
 
     let mut touchback = touch::Touchback::default();
@@ -197,45 +229,4 @@ fn connect_request(pin: Option<&str>, local_ip: std::net::IpAddr) -> Value {
     json!({"deviceName": name, "deviceType": 1, "pinCode": pin.unwrap_or(""), "connectType": 0,
         "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "functions": [],
         "originIp": local_ip.to_string(), "systemName": "Linux"})
-}
-
-fn media_socket(host: SocketAddr, port: u16) -> anyhow::Result<TcpStream> {
-    let address = SocketAddr::new(host.ip(), port);
-    let socket = TcpStream::connect_timeout(&address, ANSWER_TIMEOUT).with_context(|| format!("cannot reach {address}"))?;
-    socket.set_nodelay(true)?;
-    // A panel that stops reading must not hang the sender thread.
-    socket.set_write_timeout(Some(SILENCE))?;
-    Ok(socket)
-}
-
-/// Write each frame of appsink `name` to `socket` until `ended`. Video (`index` Some or the
-/// "sink" appsink): SPS and PPS apart, type 0. Audio: the type field carries a clock in ms,
-/// as the Android sender does.
-fn send_frames(capture: &Capture, name: &'static str, mut socket: TcpStream, mut index: Option<i32>, ended: &'static AtomicBool) -> anyhow::Result<JoinHandle<()>> {
-    use std::io::Write;
-    let sink = capture.element(name).with_context(|| format!("no {name} in the pipeline"))?;
-    let video = name == "sink";
-    let started = Instant::now();
-    Ok(std::thread::spawn(move || {
-        while !ended.load(Ordering::SeqCst) {
-            let Some(sample) = sink.emit_by_name::<Option<gst::Sample>>("try-pull-sample", &[&100_000_000u64]) else {
-                // At the end of stream the pull returns at once: stop instead of spinning.
-                if sink.property::<bool>("eos") {
-                    break;
-                }
-                continue;
-            };
-            let Some(map) = sample.buffer().and_then(|b| b.map_readable().ok()) else { continue };
-            let parts = if video { split_config(&map) } else { vec![map.as_slice()] };
-            for part in parts {
-                let kind = if video { 0 } else { started.elapsed().as_millis() as i32 };
-                if let Err(e) = socket.write_all(&media_frame(index, kind, part)) {
-                    tracing::warn!(name, "media connection: {e}");
-                    ended.store(true, Ordering::SeqCst);
-                    return;
-                }
-                index = index.map(|i| i.wrapping_add(1));
-            }
-        }
-    }))
 }

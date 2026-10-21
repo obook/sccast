@@ -16,6 +16,8 @@ pub struct Settings {
     pub audio_delay: u64,
     pub latency: f64,
     pub receiver: String,
+    /// Code shown on an interactive panel (`--pin`, or typed in the menu), kept for the next casts.
+    pub pin: Option<String>,
 }
 
 /// Name, resolution, bitrate. "Entry-level TV" comes from the Sharp tests: 4000 kbit/s froze on moving content.

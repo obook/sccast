@@ -98,7 +98,7 @@ pub fn cast_screen(
     if device.kind == device::discovery::Kind::Screenshare {
         let settings = menu::Settings { stream: cli::Stream { format: cli::Format::Screenshare, ..s.stream.clone() }, ..s.clone() };
         let host = std::net::SocketAddr::from((device.ip, device.port));
-        return crate::screenshare::cast(host, None, &settings, screen, stop, out);
+        return crate::screenshare::cast(host, &device.name, &settings, screen, stop, out);
     }
     if let Out::Menu(_) = out {
         watch_round_trip(device, stop, out.clone());

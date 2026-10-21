@@ -72,11 +72,11 @@ fn main() -> anyhow::Result<()> {
                     bail!("{} is not a file", file.display());
                 }
             }
-            let settings = menu::Settings { stream, audio_delay, latency, receiver };
+            let settings = menu::Settings { stream, audio_delay, latency, receiver, pin };
             // A panel given by address, when mDNS does not show it.
             if let Some(host) = host.filter(|_| settings.stream.format == cli::Format::Screenshare) {
                 let screen = capture::ScreenCast::open()?;
-                return screenshare::cast(host, pin.as_deref(), &settings, &screen, stop_flag()?, &Out::Term);
+                return screenshare::cast(host, &host.to_string(), &settings, &screen, stop_flag()?, &Out::Term);
             }
             // In a terminal without --device, the menu picks the device and runs the casts.
             let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
