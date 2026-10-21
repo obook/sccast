@@ -172,11 +172,25 @@ fn stream_query(s: &menu::Settings) -> String {
 /// shows there (the school's Chromecast answered in 170 to 500 ms, the test TV in 2 ms).
 fn watch_round_trip(device: &CastDevice, stop: &'static AtomicBool, out: Out) {
     let address = std::net::SocketAddr::from((device.ip, device.port));
+    let probe = move || {
+        let started = Instant::now();
+        let answered = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok();
+        answered.then(|| started.elapsed())
+    };
     std::thread::spawn(move || {
         while !stop.load(Ordering::SeqCst) {
-            let started = Instant::now();
-            let answered = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok();
-            out.send(menu::Status::RoundTrip(answered.then(|| started.elapsed())));
+            let first = probe();
+            // Linux resends a lost SYN after 1 s: try again at once, so one lost packet does
+            // not show as a slow network (seen with 5 % of losses: 1026 ms).
+            let time = if first.is_some_and(|t| t < Duration::from_secs(1)) {
+                first
+            } else {
+                match (first, probe()) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                }
+            };
+            out.send(menu::Status::RoundTrip(time));
             for _ in 0..50 {
                 if stop.load(Ordering::SeqCst) {
                     return;

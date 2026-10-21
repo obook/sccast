@@ -22,6 +22,8 @@ use super::{AUDIO_BITRATE, AUDIO_SSRC, H264_PAYLOAD, NAMESPACE, OPUS_PAYLOAD, TA
 use crate::cli::Stream;
 
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
+/// RTP extension that lets the sender change the playout delay during the session.
+const ADAPTIVE_DELAY: &str = "adaptive_playout_delay";
 
 /// OFFER for the video stream, and the audio one unless `audio` is None.
 pub fn offer(stream: &Stream, video: &Keys, audio: Option<&Keys>) -> Value {
@@ -31,7 +33,7 @@ pub fn offer(stream: &Stream, video: &Keys, audio: Option<&Keys>) -> Value {
         "rtpPayloadType": H264_PAYLOAD, "ssrc": VIDEO_SSRC, "maxFrameRate": format!("{}/1", stream.fps),
         "timeBase": "1/90000", "maxBitRate": stream.bitrate * 1000, "targetDelay": TARGET_DELAY_MS,
         "aesKey": hex(&video.key), "aesIvMask": hex(&video.iv_mask), "receiverRtcpEventLog": false,
-        "resolutions": [{"width": width, "height": height}],
+        "resolutions": [{"width": width, "height": height}], "rtpExtensions": [ADAPTIVE_DELAY],
     })];
     if let Some(audio) = audio {
         streams.push(json!({
@@ -39,6 +41,7 @@ pub fn offer(stream: &Stream, video: &Keys, audio: Option<&Keys>) -> Value {
             "rtpPayloadType": OPUS_PAYLOAD, "ssrc": AUDIO_SSRC, "bitRate": AUDIO_BITRATE,
             "timeBase": "1/48000", "channels": 2, "targetDelay": TARGET_DELAY_MS,
             "aesKey": hex(&audio.key), "aesIvMask": hex(&audio.iv_mask), "receiverRtcpEventLog": false,
+            "rtpExtensions": [ADAPTIVE_DELAY],
         }));
     }
     json!({"type": "OFFER", "seqNum": 1, "offer": {"castMode": "mirroring", "supportedStreams": streams}})
@@ -50,6 +53,9 @@ pub struct Answer {
     pub port: u16,
     pub video: bool,
     pub audio: bool,
+    /// Every accepted stream takes a new playout delay in its packets: audio and video
+    /// change it together, or lip sync would drift.
+    pub adaptive: bool,
 }
 
 fn parse_answer(answer: &Value) -> anyhow::Result<Answer> {
@@ -59,7 +65,12 @@ fn parse_answer(answer: &Value) -> anyhow::Result<Answer> {
     let body = &answer["answer"];
     let port = body["udpPort"].as_u64().and_then(|p| u16::try_from(p).ok()).context("ANSWER without udpPort")?;
     let accepted = |index| body["sendIndexes"].as_array().is_some_and(|a| a.contains(&json!(index)));
-    Ok(Answer { port, video: accepted(0), audio: accepted(1) })
+    // One list of extensions per accepted stream.
+    let adaptive = body["rtpExtensions"].as_array().is_some_and(|streams| {
+        !streams.is_empty()
+            && streams.iter().all(|e| e.as_array().is_some_and(|e| e.contains(&json!(ADAPTIVE_DELAY))))
+    });
+    Ok(Answer { port, video: accepted(0), audio: accepted(1), adaptive })
 }
 
 /// Wait for the ANSWER to the OFFER, answering the device's pings meanwhile.
@@ -120,7 +131,14 @@ mod tests {
             r#"{"answer":{"castMode":"mirroring","rtpExtensions":[[]],"sendIndexes":[0],"ssrcs":[2],"udpPort":36026},"result":"ok","seqNum":1,"type":"ANSWER"}"#,
         )
         .unwrap();
-        assert_eq!(parse_answer(&answer).unwrap(), Answer { port: 36026, video: true, audio: false });
+        assert_eq!(parse_answer(&answer).unwrap(), Answer { port: 36026, video: true, audio: false, adaptive: false });
+        assert_eq!(streams[0]["rtpExtensions"], json!([ADAPTIVE_DELAY]));
+        let both = json!({"result": "ok", "answer": {"udpPort": 1, "sendIndexes": [0, 1],
+            "rtpExtensions": [[ADAPTIVE_DELAY], [ADAPTIVE_DELAY]]}});
+        assert!(parse_answer(&both).unwrap().adaptive);
+        let video_only = json!({"result": "ok", "answer": {"udpPort": 1, "sendIndexes": [0, 1],
+            "rtpExtensions": [[ADAPTIVE_DELAY], []]}});
+        assert!(!parse_answer(&video_only).unwrap().adaptive);
         assert!(parse_answer(&json!({"result": "error", "error": {"code": 2}})).is_err());
     }
 }

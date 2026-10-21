@@ -19,7 +19,39 @@ use super::receiver::{launch, stop, stop_media, Receiver};
 const MAX_RECONNECTS: u32 = 3;
 // A drop this long after the previous one starts a new count.
 const RECONNECT_WINDOW: Duration = Duration::from_secs(300);
-const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+pub const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+
+/// Drops of one cast: give up after MAX_RECONNECTS close together, unless `forever` (menu).
+pub struct Drops {
+    count: u32,
+    last: Instant,
+    forever: bool,
+}
+
+impl Drops {
+    pub fn new(forever: bool) -> Self {
+        Self { count: 0, last: Instant::now(), forever }
+    }
+
+    /// Count a drop of `device`: the count to show, or an error when it is one too many.
+    pub fn count(&mut self, device: &str, why: &str) -> anyhow::Result<String> {
+        if self.last.elapsed() > RECONNECT_WINDOW {
+            self.count = 0;
+        }
+        self.count += 1;
+        self.last = Instant::now();
+        if self.forever {
+            return Ok(self.count.to_string());
+        }
+        if self.count > MAX_RECONNECTS {
+            anyhow::bail!(
+                "lost {device} ({why}), gave up after {MAX_RECONNECTS} reconnections. \
+                 If it no longer shows in `sccast list`, unplug it and plug it back in"
+            );
+        }
+        Ok(format!("{}/{MAX_RECONNECTS}", self.count))
+    }
+}
 
 impl Receiver {
     /// Play `url` and block until playback ends, the TV is taken by another sender, or `stop` is set.
@@ -53,9 +85,7 @@ impl Receiver {
             duration: None,
         };
         let device = receiver.device.clone();
-        let limit = if receiver.forever { u32::MAX } else { MAX_RECONNECTS };
-        let mut drops = 0;
-        let mut last_drop = Instant::now();
+        let mut drops = Drops::new(receiver.forever);
         loop {
             let track = |r: Report| {
                 if let Report::Loaded(transport, media_session) = r {
@@ -81,20 +111,8 @@ impl Receiver {
                     return Ok(());
                 }
                 tracing::warn!(%why, "session lost");
-                if last_drop.elapsed() > RECONNECT_WINDOW {
-                    drops = 0;
-                }
-                drops += 1;
-                last_drop = Instant::now();
-                if drops > limit {
-                    anyhow::bail!(
-                        "lost {} ({why}), gave up after {MAX_RECONNECTS} reconnections. \
-                         If it no longer shows in `sccast list`, unplug it and plug it back in",
-                        device.name
-                    );
-                }
+                let count = drops.count(&device.name, &why)?;
                 report(Report::Reconnecting);
-                let count = if receiver.forever { drops.to_string() } else { format!("{drops}/{MAX_RECONNECTS}") };
                 report(Report::Say(&format!("Lost {} ({why}). Reconnecting ({count})...", device.name)));
                 std::thread::sleep(RECONNECT_DELAY);
                 // A fresh launch: the session was lost, an attached app may be in the background.
@@ -151,4 +169,23 @@ fn watch_stop(
             tracing::warn!("cannot close the receiver app: {e:#}");
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gives_up_after_three_drops_unless_forever() {
+        let mut drops = Drops::new(false);
+        for n in 1..=MAX_RECONNECTS {
+            assert_eq!(drops.count("TV", "lost").unwrap(), format!("{n}/{MAX_RECONNECTS}"));
+        }
+        assert!(drops.count("TV", "lost").is_err());
+        let mut forever = Drops::new(true);
+        for _ in 0..10 {
+            forever.count("TV", "lost").unwrap();
+        }
+        assert_eq!(forever.count("TV", "lost").unwrap(), "11");
+    }
 }

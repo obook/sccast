@@ -10,17 +10,21 @@ Done:
 - [x] Check that the mirroring receiver accepts a sender that is not Chrome (on the Sharp TV)
 - [x] Python prototype (`proto/`); `cast_sender` from openscreen dropped, our own sender was simpler
 - [x] Rust sender, `--format mirror`, video and sound: 153 ms on the Sharp
-- [x] Resend lost packets at most every 50 ms, cut the bitrate at most once a second
+- [x] Resend lost packets at most once per round trip (50 ms or more), cut the bitrate at most once a second
+- [x] Read the TV's acknowledgements and measure the round trip
 - [x] Menu: Enter, `s`, `q` and closing the terminal free the TV
 - [x] Mirror by default, HLS on a device without it
+- [x] Reconnect when the TV drops the session or stops answering (TV network cut for 20 s)
+- [x] Raise the playout delay from 100 to 400 ms on losses, lower it when calm
 
 To do:
 
 - [ ] Test on the school Chromecast and on a Nest Hub (one accepted a 5 s session)
 - [ ] Test the HLS fallback on a device without mirroring
 - [ ] Test with a firewall on (ufw, firewalld)
-- [ ] Reconnect when the TV drops the session
-- [ ] Tune the bitrate steps and the target delay (100 ms) on a lossy network
+- [ ] Check that the TV applies the adaptive playout delay (the Sharp accepts it, still reports 100 ms)
+- [ ] Tune the bitrate and delay steps on a lossy network
+- [ ] Read `rtt_ms` on the school Chromecast (TCP connect took 170 to 500 ms there): delay steps may need to go above 400 ms
 - [ ] Measure the lip sync
 
 ## HLS

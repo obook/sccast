@@ -13,4 +13,5 @@ mod receiver;
 
 pub use discovery::CastDevice;
 pub use media::Report;
+pub use playback::{Drops, RECONNECT_DELAY};
 pub use receiver::{launch, stop, Receiver, DEFAULT_MEDIA_RECEIVER, SCCAST_RECEIVER};
