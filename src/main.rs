@@ -14,6 +14,7 @@ mod device;
 mod hls;
 mod menu;
 mod mirror;
+mod screenshare;
 mod session;
 
 use std::io::{IsTerminal, Write};
@@ -65,13 +66,18 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Cast { device, url, file, audio_delay, receiver, latency, stream } => {
+        Command::Cast { device, url, file, audio_delay, receiver, latency, host, pin, stream } => {
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
                 }
             }
             let settings = menu::Settings { stream, audio_delay, latency, receiver };
+            // A panel given by address, when mDNS does not show it.
+            if let Some(host) = host.filter(|_| settings.stream.format == cli::Format::Screenshare) {
+                let screen = capture::ScreenCast::open()?;
+                return screenshare::cast(host, pin.as_deref(), &settings, &screen, stop_flag()?, &Out::Term);
+            }
             // In a terminal without --device, the menu picks the device and runs the casts.
             let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
             if device.is_none() && url.is_none() && file.is_none() && interactive {
@@ -106,7 +112,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Serve { test_pattern, mut stream } => {
             // Mirror streams to a TV only, over RTP: serve plays the same screen in HLS.
-            if stream.format == cli::Format::Mirror {
+            if matches!(stream.format, cli::Format::Mirror | cli::Format::Screenshare) {
                 stream.format = cli::Format::Hls;
             }
             let screen = if test_pattern { None } else { Some(capture::ScreenCast::open()?) };

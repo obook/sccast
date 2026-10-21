@@ -66,7 +66,7 @@ fn video_encode(stream: &Stream) -> String {
              ! tcpserversink name=out host=127.0.0.1 port=0 sync=false \
              sync-method=latest-keyframe recover-policy=keyframe",
         ),
-        Format::Mirror => (
+        Format::Mirror | Format::Screenshare => (
             fps * 5,
             "h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au \
              ! appsink name=sink sync=false max-buffers=4",
@@ -81,11 +81,17 @@ fn video_encode(stream: &Stream) -> String {
 }
 
 /// Mirror: Opus in 10 ms frames, each one a Cast frame.
+/// Screenshare: AAC at 44.1 kHz with ADTS headers, as the panel's Android sender.
 fn audio_encode(format: Format) -> String {
     let encode = match format {
         Format::Hls => "avenc_aac bitrate=128000 ! aacparse ! sink.audio",
         Format::Mkv => "avenc_aac bitrate=128000 ! aacparse ! sink.audio_%u",
         Format::Mirror => "opusenc bitrate=128000 frame-size=10 ! appsink name=asink sync=false max-buffers=20",
+        Format::Screenshare => {
+            "avenc_aac bitrate=128000 ! aacparse ! audio/mpeg,stream-format=adts \
+             ! appsink name=asink sync=false max-buffers=20"
+        }
     };
-    format!("audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! {encode}")
+    let rate = if format == Format::Screenshare { 44100 } else { 48000 };
+    format!("audioconvert ! audioresample ! audio/x-raw,rate={rate},channels=2 ! {encode}")
 }

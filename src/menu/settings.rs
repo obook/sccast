@@ -89,6 +89,7 @@ pub(super) fn value(s: &Settings, row: usize) -> String {
             Format::Hls => "HLS",
             Format::Mkv => "Matroska",
             Format::Mirror => "Mirror",
+            Format::Screenshare => "Screenshare",
         }
         .to_string(),
     }

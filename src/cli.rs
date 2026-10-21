@@ -49,6 +49,12 @@ pub enum Command {
         /// PC was in use (2026-10-21); 1.5 s did not.
         #[arg(long, default_value_t = 1.5)]
         latency: f64,
+        /// Screenshare format: the panel's address and command port. Unverified on a real panel.
+        #[arg(long, required_if_eq("format", "screenshare"))]
+        host: Option<std::net::SocketAddr>,
+        /// Screenshare format: the code shown on the panel, if it asks for one.
+        #[arg(long)]
+        pin: Option<String>,
         #[command(flatten)]
         stream: Stream,
     },
@@ -91,6 +97,7 @@ pub struct Stream {
     pub no_audio: bool,
     /// mirror: Cast Streaming, as Chrome's tab casting, about 0.15 s behind the screen; HLS on a
     /// device without it. hls: 1-second segments, 2 to 3 s. mkv: one Matroska stream (experimental).
+    /// screenshare: interactive panels, with --host (see docs/screenshare.md).
     /// The screen only: serve, --url and --file always use HLS.
     #[arg(long, value_enum, default_value_t = Format::Mirror)]
     pub format: Format,
@@ -101,6 +108,7 @@ pub enum Format {
     Hls,
     Mkv,
     Mirror,
+    Screenshare,
 }
 
 fn parse_resolution(s: &str) -> Result<(u32, u32), String> {

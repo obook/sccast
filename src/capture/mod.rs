@@ -167,6 +167,15 @@ pub fn set_audio_delay(pad: &gst::Pad, ms: u64) {
     pad.set_offset(i64::try_from(ms).unwrap_or(0).saturating_mul(1_000_000));
 }
 
+/// Ask `encoder` for a key frame with SPS and PPS.
+/// Upstream on the src pad: not serialized, so no wait for the encoder's stream lock.
+pub fn request_key_frame(encoder: &gst::Element) {
+    let event = gst::Structure::builder("GstForceKeyUnit").field("all-headers", true).build();
+    if let Some(pad) = encoder.static_pad("src") {
+        pad.send_event(gst::event::CustomUpstream::new(event));
+    }
+}
+
 /// Replace the timestamps of `src` buffers with the pipeline running time at arrival.
 /// With pipewiresrc on KWin, even with do-timestamp, videorate produced 3 s of video
 /// per wall-clock second: the source timestamps cannot be trusted.

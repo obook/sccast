@@ -19,7 +19,7 @@ use gstreamer::prelude::*;
 use super::rate::{Delay, Rate, LOSS_LIMIT};
 use super::rtcp::{parse_rtcp, Feedback};
 use super::{Session, KEY_FRAME_SPACING, REPORT_INTERVAL, SILENCE, SILENCE_START, VIDEO_SSRC};
-use crate::capture::Capture;
+use crate::capture::{request_key_frame, Capture};
 
 /// Send each encoded frame of appsink `name` as it comes, until `stop`.
 pub fn send_frames(
@@ -172,12 +172,4 @@ pub fn feedback(session: &Arc<Session>, encoder: gst::Element, bitrate: u32, sto
             }
         }
     })
-}
-
-/// Upstream on the src pad: not serialized, so no wait for the encoder's stream lock.
-fn request_key_frame(encoder: &gst::Element) {
-    let event = gst::Structure::builder("GstForceKeyUnit").field("all-headers", true).build();
-    if let Some(pad) = encoder.static_pad("src") {
-        pad.send_event(gst::event::CustomUpstream::new(event));
-    }
 }
