@@ -86,7 +86,10 @@ only reads files.
 - Lip sync: sound about 250 ms late on the Sharp, by eye (2026-10-21). Both
   streams leave the PC fresh (audio 20 ms old, video 30 to 65 ms). A
   negative audio delay only helps within the playout delay (100 ms): the TV
-  cannot play a sound before it arrives. To measure with a slow motion film.
+  cannot play a sound before it arrives. The source was the Freebox stream
+  in VLC, whose sound is already slightly late on the PC: part of the
+  250 ms comes from it. To measure on a page that flashes and beeps at once,
+  filmed in slow motion.
 - Until the TV acknowledges a video frame, sccast forces a key frame every
   second. The Sharp acknowledged the first one after 210 ms.
 - Tuning: delay and bitrate steps are guesses (delay steps from CastMirror).
