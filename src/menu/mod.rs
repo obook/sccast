@@ -37,6 +37,7 @@ enum Found {
 }
 
 /// What the user asked for.
+#[derive(Debug)]
 pub enum Action {
     /// Cast to this device, stopping the current cast first.
     Cast(CastDevice),
@@ -44,18 +45,6 @@ pub enum Action {
     /// Choose the screen again in the portal dialog.
     PickScreen,
     Quit,
-}
-
-impl Action {
-    /// Short name for the log.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Action::Cast(_) => "cast",
-            Action::Stop => "stop",
-            Action::PickScreen => "pick screen",
-            Action::Quit => "quit",
-        }
-    }
 }
 
 /// Progress of the running cast, sent by its thread.

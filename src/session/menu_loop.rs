@@ -70,7 +70,7 @@ fn drive_menu(
                 menu::Action::Quit
             }
         };
-        tracing::info!(action = action.name(), "menu action");
+        tracing::info!(?action, "menu action");
         if let menu::Action::PickScreen = action {
             pick_screen(&menu, &screen, s.touchback);
             continue;
