@@ -141,8 +141,14 @@ message table; unverified on a real panel.
    press and release, 23 and 24 right, 25 move, 26 left click, 27 right
    click, 28 double click, 29 wheel.
 
-Unknown: which coordinate pair the panel fills, and in which unit (screen
-pixels or 0 to 1). The Windows client also sends a UDP beat (type 3, id 81)
+On Windows the touches reach `RemoteControlClient::MouseMove(bool, int x,
+int y)` and friends (`SWSTRemoteControlTool.dll`), then
+`RemoteControlServer::InjectPrivilegedMouse`, which calls `SendInput`.
+With the flag false, x and y are absolute pixels of the PC's desktop,
+checked against its bounds (`GetSystemMetrics` 76 to 79). With the flag
+true, they are a relative move. Hypothesis: the flag is `enable`, and the
+panel scales touches to the video size sent in the cast request.
+Unknown: which pair (`x, y` or `pointX, pointY`) carries them. The Windows client also sends a UDP beat (type 3, id 81)
 to the panel; where to is unclear, so sccast does not send it.
 
 sccast logs the touches. Injecting them into the desktop through the
