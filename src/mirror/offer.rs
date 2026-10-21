@@ -56,13 +56,15 @@ pub struct Answer {
     /// Every accepted stream takes a new playout delay in its packets: audio and video
     /// change it together, or lip sync would drift.
     pub adaptive: bool,
+    /// Screen size the receiver reports (a Nest Hub: 1280x720), if any.
+    pub display: Option<(u32, u32)>,
 }
 
 /// A refusal (`result` not "ok") reads as no stream accepted: the caller tries a smaller video.
 fn parse_answer(answer: &Value) -> anyhow::Result<Answer> {
     if answer["result"] != "ok" {
         tracing::info!(error = %answer["error"], "the TV refused the OFFER");
-        return Ok(Answer { port: 0, video: false, audio: false, adaptive: false });
+        return Ok(Answer { port: 0, video: false, audio: false, adaptive: false, display: None });
     }
     let body = &answer["answer"];
     let port = body["udpPort"].as_u64().and_then(|p| u16::try_from(p).ok()).context("ANSWER without udpPort")?;
@@ -72,7 +74,10 @@ fn parse_answer(answer: &Value) -> anyhow::Result<Answer> {
         !streams.is_empty()
             && streams.iter().all(|e| e.as_array().is_some_and(|e| e.contains(&json!(ADAPTIVE_DELAY))))
     });
-    Ok(Answer { port, video: accepted(0), audio: accepted(1), adaptive })
+    let size = &body["display"]["dimensions"];
+    let side = |key| size[key].as_u64().and_then(|v| u32::try_from(v).ok()).filter(|v| *v > 0);
+    let display = side("width").zip(side("height"));
+    Ok(Answer { port, video: accepted(0), audio: accepted(1), adaptive, display })
 }
 
 /// Wait for the ANSWER to the OFFER, answering the device's pings meanwhile.
@@ -136,7 +141,19 @@ mod tests {
             r#"{"answer":{"castMode":"mirroring","rtpExtensions":[[]],"sendIndexes":[0],"ssrcs":[2],"udpPort":36026},"result":"ok","seqNum":1,"type":"ANSWER"}"#,
         )
         .unwrap();
-        assert_eq!(parse_answer(&answer).unwrap(), Answer { port: 36026, video: true, audio: false, adaptive: false });
+        assert_eq!(
+            parse_answer(&answer).unwrap(),
+            Answer { port: 36026, video: true, audio: false, adaptive: false, display: None }
+        );
+        // The Nest Hub's answer.
+        let nest: Value = serde_json::from_str(
+            r#"{"answer":{"display":{"dimensions":{"frameRate":"30","height":720,"width":1280},"scaling":"receiver"},"sendIndexes":[1,0],"ssrcs":[1556764419,1556764418],"udpPort":58569},"result":"ok","seqNum":1,"type":"ANSWER"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parse_answer(&nest).unwrap(),
+            Answer { port: 58569, video: true, audio: true, adaptive: false, display: Some((1280, 720)) }
+        );
         assert_eq!(streams[0]["rtpExtensions"], json!([ADAPTIVE_DELAY]));
         let both = json!({"result": "ok", "answer": {"udpPort": 1, "sendIndexes": [0, 1],
             "rtpExtensions": [[ADAPTIVE_DELAY], [ADAPTIVE_DELAY]]}});

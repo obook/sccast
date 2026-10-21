@@ -244,9 +244,22 @@ fn stream(
         }
         out.say(&format!("{} refused {width}x{height}: trying 1280x720...", device.name));
         settings.resolution = SMALLER_VIDEO;
-        out.send(menu::Status::Resolution(SMALLER_VIDEO));
         seq += 1;
     };
+    // A screen smaller than the video (Nest Hub: 1280x720): encode at its size, it would scale
+    // the video down anyway. The OFFER gave a maximum, so no new one.
+    if let Some((width, height)) = answer.display {
+        let (width, height) = (width & !1, height & !1);
+        if width < settings.resolution.0 && height < settings.resolution.1 {
+            tracing::info!(width, height, "encoding at the receiver's screen size");
+            settings.resolution = (width, height);
+        }
+    }
+    if settings.resolution != s.stream.resolution {
+        let (width, height) = settings.resolution;
+        out.say(&format!("Sending {width}x{height}, the size {} takes.", device.name));
+        out.send(menu::Status::Resolution(settings.resolution));
+    }
     // The capture starts once the TV is ready: frames would pile up before.
     settings.no_audio = !answer.audio;
     let capture = Capture::start(Some(screen), &settings, Duration::from_millis(s.audio_delay))?;
