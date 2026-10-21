@@ -116,7 +116,7 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--format mirror` | `mirror` | Google's screen mirroring, H.264 and Opus over RTP, about 0.15 s of delay. HLS on a device without it |
 | `--format hls` | | 1-second HLS segments, 2 to 3 s of delay. `serve`, `--url` and `--file` always use it |
 | `--format mkv` | | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
-| `--audio-delay MS` | `0` | Delays the sound on the TV (`cast` only) |
+| `--audio-delay MS` | `0` | Delays the sound on the TV, negative brings it forward (`cast` only). The menu changes it during a cast |
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
 
@@ -157,7 +157,8 @@ a refusal.
 Sound before image: the PC speakers play live, a few seconds ahead of the TV.
 Mute the PC in the desktop: on PipeWire, the stream keeps its sound (checked
 on KDE neon). If the TV sound leads its image, add `--audio-delay 200` and
-adjust.
+adjust, or change "Audio delay" in the menu during the cast. A negative
+value brings a late sound forward, by 100 ms at most in screen mirroring.
 
 Image but no sound, with a Chromecast on HDMI: set the TV audio output to
 PCM (needed on a Sharp TV, with every app).

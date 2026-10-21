@@ -44,7 +44,7 @@ pub struct Capture {
 impl Capture {
     /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
     /// `audio_delay` shifts the sound later to line it up with the image.
-    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay: Duration) -> anyhow::Result<Self> {
+    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay_ms: i64) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
@@ -70,7 +70,7 @@ impl Capture {
         }
         if let Some(asrc) = bin.by_name("asrc") {
             let pad = asrc.static_pad("src").context("audio source has no src pad")?;
-            pad.set_offset(audio_delay.as_nanos() as i64);
+            pad.set_offset(audio_delay_ms * 1_000_000);
         }
         if stream.format == Format::Hls {
             let sink = bin.by_name("sink").context("hlssink2 not found in pipeline")?;
@@ -92,6 +92,11 @@ impl Capture {
     pub fn served(&self) -> Option<impl Fn() -> u64 + Send + 'static> {
         let out = self.pipeline.downcast_ref::<gst::Bin>()?.by_name("out")?;
         Some(move || out.property::<u64>("bytes-served"))
+    }
+
+    /// Output of the sound source: the menu moves its offset to change the audio delay live.
+    pub fn audio_pad(&self) -> Option<gst::Pad> {
+        self.pipeline.downcast_ref::<gst::Bin>()?.by_name("asrc")?.static_pad("src")
     }
 
     /// The pipeline, for its running time (mirror format).

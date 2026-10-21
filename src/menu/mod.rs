@@ -28,7 +28,7 @@ use ratatui::DefaultTerminal;
 use crate::device::{discovery, CastDevice};
 use live::Live;
 pub use settings::Settings;
-use settings::{change, ROWS};
+use settings::{change, AUDIO_DELAY_ROW, ROWS};
 
 enum Found {
     Device(CastDevice),
@@ -63,6 +63,8 @@ pub enum Status {
     RoundTrip(Option<Duration>),
     /// The cast went down to this resolution (the TV refused the one set).
     Resolution((u32, u32)),
+    /// Output of the cast's sound source: the audio delay row moves its offset live.
+    AudioPad(gstreamer::Pad),
 }
 
 pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
@@ -84,6 +86,8 @@ pub struct Menu {
     live: Live,
     /// The user's resolution while the menu shows the one a device took (Nest Hub: 1280x720).
     chosen_resolution: Option<(u32, u32)>,
+    /// Sound source of the running cast, for the live audio delay.
+    audio_pad: Option<gstreamer::Pad>,
 }
 
 impl Menu {
@@ -112,6 +116,7 @@ impl Menu {
             status_rx,
             live: Live::default(),
             chosen_resolution: None,
+            audio_pad: None,
         }
     }
 
@@ -142,11 +147,27 @@ impl Menu {
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
             // Handled in next(), which holds the settings.
             Status::Resolution(_) => {}
+            Status::AudioPad(pad) => self.audio_pad = Some(pad),
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
+                self.audio_pad = None;
                 self.live.started = None;
                 self.status = status;
+            }
+        }
+    }
+
+    /// Change the selected setting by hand. The audio delay also applies to the running cast.
+    fn change_setting(&mut self, s: &mut Settings, dir: isize) {
+        let row = self.row.selected().unwrap_or(0);
+        self.chosen_resolution = None;
+        change(s, row, dir);
+        if row == AUDIO_DELAY_ROW {
+            if let Some(pad) = &self.audio_pad {
+                use gstreamer::prelude::PadExt;
+                pad.set_offset(s.audio_delay * 1_000_000);
+                tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
             }
         }
     }
@@ -256,14 +277,8 @@ impl Menu {
                 KeyCode::End if count > 0 => state.select(Some(count - 1)),
                 KeyCode::Tab | KeyCode::BackTab => self.on_settings = !self.on_settings,
                 // A change by hand becomes the user's choice.
-                KeyCode::Left | KeyCode::Char('h') if self.on_settings => {
-                    self.chosen_resolution = None;
-                    change(s, self.row.selected().unwrap_or(0), -1);
-                }
-                KeyCode::Right | KeyCode::Char('l') if self.on_settings => {
-                    self.chosen_resolution = None;
-                    change(s, self.row.selected().unwrap_or(0), 1);
-                }
+                KeyCode::Left | KeyCode::Char('h') if self.on_settings => self.change_setting(s, -1),
+                KeyCode::Right | KeyCode::Char('l') if self.on_settings => self.change_setting(s, 1),
                 KeyCode::Char('r') => self.scan(),
                 KeyCode::Enter => {
                     let list = self.list();

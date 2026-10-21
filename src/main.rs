@@ -111,7 +111,7 @@ fn main() -> anyhow::Result<()> {
             }
             let screen = if test_pattern { None } else { Some(capture::ScreenCast::open()?) };
             let stop = stop_flag()?;
-            let hls = capture::Capture::start(screen.as_ref(), &stream, Duration::ZERO)?;
+            let hls = capture::Capture::start(screen.as_ref(), &stream, 0)?;
             let (path, _, _server) = session::serve(&hls, &stream, stop)?;
             println!("http://localhost:{}/{path}", stream.port);
             while !stop.load(Ordering::SeqCst) {

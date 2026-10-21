@@ -262,7 +262,10 @@ fn stream(
     }
     // The capture starts once the TV is ready: frames would pile up before.
     settings.no_audio = !answer.audio;
-    let capture = Capture::start(Some(screen), &settings, Duration::from_millis(s.audio_delay))?;
+    let capture = Capture::start(Some(screen), &settings, s.audio_delay)?;
+    if let Some(pad) = capture.audio_pad() {
+        out.send(menu::Status::AudioPad(pad));
+    }
     let pipeline = capture.pipeline();
     // Before PLAYING the running time reads 0, which would date every frame too early.
     let _ = pipeline.state(gst::ClockTime::from_seconds(2));
