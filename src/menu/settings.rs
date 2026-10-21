@@ -18,6 +18,9 @@ pub struct Settings {
     pub receiver: String,
     /// Code shown on an interactive panel (`--pin`, or typed in the menu), kept for the next casts.
     pub pin: Option<String>,
+    /// The screen dialog also grants the pointer, for the panels' touches. Applies at the
+    /// next screen choice.
+    pub touchback: bool,
 }
 
 /// Name, resolution, bitrate. "Entry-level TV" comes from the Sharp tests: 4000 kbit/s froze on moving content.
@@ -36,8 +39,11 @@ const AUDIO_DELAYS: [u64; 12] = [0, 50, 100, 150, 200, 250, 300, 400, 500, 750, 
 /// Row of the audio delay, applied at once to a running cast.
 pub(super) const AUDIO_DELAY_ROW: usize = 6;
 
-pub(super) const ROWS: [&str; 9] = [
-    "Preset", "Resolution", "Bitrate", "Frame rate", "Latency", "Sound", "Audio delay", "Receiver", "Format",
+/// Row of the touchback setting, applied at the next screen choice.
+pub(super) const TOUCHBACK_ROW: usize = 9;
+
+pub(super) const ROWS: [&str; 10] = [
+    "Preset", "Resolution", "Bitrate", "Frame rate", "Latency", "Sound", "Audio delay", "Receiver", "Format", "Touchback",
 ];
 
 /// Next (dir 1) or previous (dir -1) entry of `list`, wrapping. A value not in the list jumps to its first entry.
@@ -67,7 +73,8 @@ pub(super) fn change(s: &mut Settings, row: usize, dir: isize) {
         5 => st.no_audio = !st.no_audio,
         AUDIO_DELAY_ROW => s.audio_delay = cycle(&AUDIO_DELAYS, s.audio_delay, dir),
         7 => s.receiver = cycle(&[SCCAST_RECEIVER, DEFAULT_MEDIA_RECEIVER], s.receiver.as_str(), dir).to_string(),
-        _ => st.format = cycle(&[Format::Hls, Format::Mkv, Format::Mirror], st.format, dir),
+        8 => st.format = cycle(&[Format::Hls, Format::Mkv, Format::Mirror], st.format, dir),
+        _ => s.touchback = !s.touchback,
     }
 }
 
@@ -87,12 +94,13 @@ pub(super) fn value(s: &Settings, row: usize) -> String {
             DEFAULT_MEDIA_RECEIVER => "Google".to_string(),
             other => other.to_string(),
         },
-        _ => match st.format {
+        8 => match st.format {
             Format::Hls => "HLS",
             Format::Mkv => "Matroska",
             Format::Mirror => "Mirror",
             Format::Screenshare => "Screenshare",
         }
         .to_string(),
+        _ => if s.touchback { "on" } else { "off" }.to_string(),
     }
 }

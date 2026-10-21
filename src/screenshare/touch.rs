@@ -1,8 +1,8 @@
 //! touch.rs
 //! Touchback: the panel asks the PC for a UDP port on the command channel, then sends each
 //! touch on it as a pointer event. Read from the Windows client (touchback service) and the
-//! Android sender's message table; unverified on a real panel. Events are decoded and logged:
-//! injecting them into the desktop is not done yet.
+//! Android sender's message table; unverified on a real panel. With the Touchback setting, the
+//! touches move the desktop's pointer through the portal (capture/portal.rs).
 //!
 //! Author: O. Booklage
 //! Date: October 2026
@@ -10,11 +10,13 @@
 
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use super::wire::ScreenshareMessage;
+use crate::capture::Input;
 
 /// Android's table: (6, 6) asks with `toggle`, (6, 106) answers with `udpServerPort`.
 const ANDROID_REQUEST: (i32, i32) = (6, 6);
@@ -53,12 +55,19 @@ pub fn answer(m: &ScreenshareMessage, port: u16) -> ((i32, i32), Value) {
 }
 
 /// Touchback state of one cast: the UDP port and the stop flag of its reading thread.
-#[derive(Default)]
 pub struct Touchback {
     running: Option<(u16, &'static AtomicBool)>,
+    /// The desktop's pointer; None when the Touchback setting is off.
+    input: Option<Arc<Input>>,
+    /// Size of the video the panel shows, in pixels.
+    video: (f64, f64),
 }
 
 impl Touchback {
+    pub fn new(input: Option<Arc<Input>>, (width, height): (u32, u32)) -> Self {
+        Self { running: None, input, video: (f64::from(width), f64::from(height)) }
+    }
+
     /// Act on a touchback request in `m`; return the answer to send, if any.
     pub fn handle(&mut self, m: &ScreenshareMessage) -> Option<((i32, i32), Value)> {
         match request(m)? {
@@ -67,10 +76,16 @@ impl Touchback {
                 None
             }
             Request::Start => {
+                // Refused when off: the panel says so instead of showing touches that do nothing.
+                let Some(input) = self.input.clone() else {
+                    tracing::info!("touchback asked by the panel, but the Touchback setting is off");
+                    return Some(answer(m, 0));
+                };
                 if self.running.is_none() {
                     // ponytail: leaks one flag per start (a byte), the thread wants a 'static flag.
                     let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
-                    match listen(ended, |touch| tracing::info!(?touch, "touch")) {
+                    let video = self.video;
+                    match listen(ended, move |touch| apply(&input, &touch, video)) {
                         Ok(port) => self.running = Some((port, ended)),
                         Err(e) => tracing::warn!("touchback socket: {e}"),
                     }
@@ -143,6 +158,52 @@ pub fn decode(datagram: &[u8]) -> Option<TouchEvent> {
     Some(TouchEvent { action, x: get("x"), y: get("y"), point_x: get("pointX"), point_y: get("pointY") })
 }
 
+/// Point of the shared screen under (`x`, `y`) of the video, which shows the screen
+/// letterboxed (capture/encode.rs). None in the black bands.
+pub fn to_screen((x, y): (f64, f64), video: (f64, f64), screen: (f64, f64)) -> Option<(f64, f64)> {
+    let scale = (video.0 / screen.0).min(video.1 / screen.1);
+    let (left, top) = ((video.0 - screen.0 * scale) / 2.0, (video.1 - screen.1 * scale) / 2.0);
+    let (sx, sy) = ((x - left) / scale, (y - top) / scale);
+    (sx >= 0.0 && sy >= 0.0 && sx < screen.0 && sy < screen.1).then_some((sx, sy))
+}
+
+/// Touch position in video pixels. Hypothesis, from the Windows client: `x, y` are pixels of
+/// the video size sent in the cast request; `pointX, pointY` are read as 0 to 1 when only they
+/// are filled.
+fn video_point(touch: &TouchEvent, video: (f64, f64)) -> (f64, f64) {
+    let unit = 0.0..=1.0;
+    if touch.x == 0.0 && touch.y == 0.0 && unit.contains(&touch.point_x) && unit.contains(&touch.point_y) {
+        (touch.point_x * video.0, touch.point_y * video.1)
+    } else {
+        (touch.x, touch.y)
+    }
+}
+
+/// Move the desktop's pointer as `touch` says.
+fn apply(input: &Input, touch: &TouchEvent, video: (f64, f64)) {
+    tracing::debug!(?touch, "touch");
+    if touch.action == Action::Wheel {
+        // Hypothesis: the sign of y gives the direction.
+        if touch.y != 0.0 {
+            input.wheel(touch.y.signum() as i32);
+        }
+        return;
+    }
+    let Some((x, y)) = to_screen(video_point(touch, video), video, input.size) else { return };
+    input.move_to(x, y);
+    let click = |right: bool| {
+        input.button(right, true);
+        input.button(right, false);
+    };
+    match touch.action {
+        Action::Press(button) => input.button(button == Button::Right, true),
+        Action::Release(button) => input.button(button == Button::Right, false),
+        Action::Click(button) => click(button == Button::Right),
+        Action::DoubleClick => (0..2).for_each(|_| click(false)),
+        Action::Move | Action::Wheel => {}
+    }
+}
+
 /// Open a UDP socket on any port and read touches on it until `ended`, passing each to `on_touch`.
 fn listen(ended: &'static AtomicBool, mut on_touch: impl FnMut(TouchEvent) + Send + 'static) -> std::io::Result<u16> {
     let socket = UdpSocket::bind(("0.0.0.0", 0))?;
@@ -176,6 +237,19 @@ mod tests {
         assert_eq!(touch, TouchEvent { action: Action::Press(Button::Left), x: 480.0, y: 540.0, point_x: 0.25, point_y: 0.5 });
         assert!(decode(&message(1, 21, "{}").encode()).is_none());
         assert!(decode(&message(3, 99, "{}").encode()).is_none());
+    }
+
+    #[test]
+    fn maps_touches_to_the_letterboxed_screen() {
+        // A 1920x1200 screen in 1920x1080 video: 1728x1080 image, bands of 96 px left and right.
+        let (video, screen) = ((1920.0, 1080.0), (1920.0, 1200.0));
+        assert_eq!(to_screen((96.0, 0.0), video, screen), Some((0.0, 0.0)));
+        assert_eq!(to_screen((960.0, 540.0), video, screen), Some((960.0, 600.0)));
+        assert_eq!(to_screen((50.0, 540.0), video, screen), None);
+        // Same shape: pixels scale straight.
+        assert_eq!(to_screen((640.0, 360.0), (1280.0, 720.0), video), Some((960.0, 540.0)));
+        let only_unit = TouchEvent { action: Action::Move, x: 0.0, y: 0.0, point_x: 0.5, point_y: 0.25 };
+        assert_eq!(video_point(&only_unit, video), (960.0, 270.0));
     }
 
     #[test]

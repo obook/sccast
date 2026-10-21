@@ -56,6 +56,10 @@ pub enum Command {
         /// address (unverified on a real panel).
         #[arg(long)]
         pin: Option<String>,
+        /// Let a panel's touches drive the pointer: the screen dialog also asks for pointer
+        /// control (unverified on a real panel).
+        #[arg(long)]
+        touchback: bool,
         #[command(flatten)]
         stream: Stream,
     },

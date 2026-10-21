@@ -23,7 +23,7 @@ use tempfile::TempDir;
 
 use crate::cli::{Format, Stream};
 pub use encode::{MKV, PLAYLIST};
-pub use portal::ScreenCast;
+pub use portal::{Input, ScreenCast};
 
 /// Segments to wait for before casting: the window must already be twice the receiver's
 /// 3-segment hold-back, or it starts at the window edge and stalls until the playlist grows.

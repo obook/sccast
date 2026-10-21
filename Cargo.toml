@@ -15,7 +15,7 @@ repository = "https://github.com/obook/sccast"
 aes = "0.9.3"
 ctr = "0.10.1"
 anyhow = "1.0.104"
-ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast"] }
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 clap = { version = "4.6.7", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }

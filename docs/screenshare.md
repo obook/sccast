@@ -172,8 +172,13 @@ panel scales touches to the video size sent in the cast request.
 Unknown: which pair (`x, y` or `pointX, pointY`) carries them. The Windows client also sends a UDP beat (type 3, id 81)
 to the panel; where to is unclear, so sccast does not send it.
 
-sccast logs the touches. Injecting them into the desktop through the
-RemoteDesktop portal is not done yet.
+In sccast: the Touchback setting (menu row, or `--touchback`) makes the
+screen dialog also grant the pointer (RemoteDesktop portal on the same
+session as the capture). The touches then move the pointer to the matching
+point of the shared screen, black bands of the video left out, and press
+the buttons; the wheel moves one notch per event, its direction taken from
+the sign of `y` (hypothesis). With the setting off, sccast refuses the
+panel's request (`resultType` -100), so the panel can say so.
 
 ## Not done
 

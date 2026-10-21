@@ -47,12 +47,13 @@ Done (unverified on a panel):
 - [x] Find a panel by the code it shows (`--pin`, `c` in the menu)
 - [x] Menu: Enter on a panel asks for the code it shows, then counts down while someone allows the cast on the panel (90 s)
 - [x] Menu: bitrate, dropped frames and live audio delay for a panel too
+- [x] Touchback setting (`--touchback`, menu row): the panel's touches move the pointer through the RemoteDesktop portal
 
 To do:
 
 - [ ] Test on a real panel (ask before)
+- [ ] Touchback on a real panel: which coordinates it sends, the wheel's direction, the UDP beat to the panel
 - [ ] SSDP discovery, only if a panel does not answer mDNS
-- [ ] Touchback: touches on the panel drive the PC (UDP events, injected through the RemoteDesktop portal)
 - [ ] Follow the panel's size and frame rate requests, and its bitrate
 - [ ] Menu: show "Screenshare" as the format when a panel is selected, grey out the rows that do not apply (latency, receiver)
 - [ ] Keep the panel connection between two casts, if a real panel asks for approval again each time

@@ -66,13 +66,13 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Cast { device, url, file, audio_delay, receiver, latency, host, pin, stream } => {
+        Command::Cast { device, url, file, audio_delay, receiver, latency, host, pin, touchback, stream } => {
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
                 }
             }
-            let settings = menu::Settings { stream, audio_delay, latency, receiver, pin };
+            let settings = menu::Settings { stream, audio_delay, latency, receiver, pin, touchback };
             // A panel given by address or by its code, without discovery.
             if settings.stream.format == cli::Format::Screenshare && device.is_none() {
                 let host = match (host, settings.pin.as_deref()) {
@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
                     (None, Some(code)) => screenshare::pin::decode(code).map_err(anyhow::Error::msg)?.into(),
                     (None, None) => bail!("--format screenshare needs --pin CODE, --host IP:PORT or --device NAME"),
                 };
-                let screen = capture::ScreenCast::open()?;
+                let screen = capture::ScreenCast::open(settings.touchback)?;
                 return screenshare::cast(host, &host.to_string(), &settings, &screen, stop_flag()?, &Out::Term);
             }
             // In a terminal without --device, the menu picks the device and runs the casts.
@@ -105,7 +105,7 @@ fn main() -> anyhow::Result<()> {
                 let receiver = session::launch(&device, &settings.receiver, false, stop, &out)?;
                 return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop, &NO_KEEP, &say);
             }
-            let screen = capture::ScreenCast::open()?;
+            let screen = capture::ScreenCast::open(settings.touchback)?;
             session::cast_screen(&device, &settings, &screen, stop, None, &out)
         }
         Command::Stop { device, receiver: app_id } => {
@@ -120,7 +120,7 @@ fn main() -> anyhow::Result<()> {
             if matches!(stream.format, cli::Format::Mirror | cli::Format::Screenshare) {
                 stream.format = cli::Format::Hls;
             }
-            let screen = if test_pattern { None } else { Some(capture::ScreenCast::open()?) };
+            let screen = if test_pattern { None } else { Some(capture::ScreenCast::open(false)?) };
             let stop = stop_flag()?;
             let hls = capture::Capture::start(screen.as_ref(), &stream, 0)?;
             let (path, _, _server) = session::serve(&hls, &stream, stop)?;

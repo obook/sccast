@@ -22,7 +22,7 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // Ctrl+C is a key in the menu; the flag still catches SIGTERM.
     let quit = stop_flag()?;
     // The screen first, before the menu takes the terminal.
-    let screen = ScreenCast::open()?;
+    let screen = ScreenCast::open(settings.touchback)?;
     // A fresh log for each run.
     if let Ok(file) = std::fs::File::create(crate::log_path()) {
         let _ = crate::MENU_LOG.set(file);
@@ -60,7 +60,7 @@ fn drive_menu(
             }
         };
         if let menu::Action::PickScreen = action {
-            pick_screen(&menu, &screen);
+            pick_screen(&menu, &screen, s.touchback);
             continue;
         }
         // The receiver stays open on the TV between casts to the same TV, and after s:
@@ -151,12 +151,12 @@ fn close_on_signal(tv: &Arc<Mutex<Option<(CastDevice, String)>>>, quit: &'static
 }
 
 /// Open the portal dialog in a thread: the menu keeps answering, the cast goes on meanwhile.
-fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>) {
+fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>, touchback: bool) {
     let out = Out::Menu(menu.current_sender());
     let slot = Arc::clone(screen);
     std::thread::spawn(move || {
         out.say("Choose the screen in the dialog...");
-        match ScreenCast::open() {
+        match ScreenCast::open(touchback) {
             Ok(opened) => {
                 *slot.lock().unwrap() = Arc::new(opened);
                 out.say("Screen changed: Enter casts it.");

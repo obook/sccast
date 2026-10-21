@@ -29,7 +29,7 @@ use ratatui::DefaultTerminal;
 use crate::device::{discovery, CastDevice};
 use live::Live;
 pub use settings::Settings;
-use settings::{change, AUDIO_DELAY_ROW, ROWS};
+use settings::{change, AUDIO_DELAY_ROW, ROWS, TOUCHBACK_ROW};
 
 enum Found {
     Device(CastDevice),
@@ -170,6 +170,9 @@ impl Menu {
         let row = self.row.selected().unwrap_or(0);
         self.chosen_resolution = None;
         change(s, row, dir);
+        if row == TOUCHBACK_ROW {
+            self.status = Status::Info("Touchback: press p to choose the screen again".into());
+        }
         if row == AUDIO_DELAY_ROW && self.casting.is_some() {
             match &self.audio_pad {
                 Some(pad) => {

@@ -186,7 +186,7 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
         senders.push(send_frames(&capture, "asink", socket, None, bitrate, &link, ended)?);
     }
 
-    let mut touchback = touch::Touchback::default();
+    let mut touchback = touch::Touchback::new(screen.input.clone(), s.stream.resolution);
     let mut last_heartbeat = Instant::now();
     let mut last_heard = Instant::now();
     let lost = loop {
