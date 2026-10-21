@@ -42,7 +42,9 @@ Done (unverified on a panel):
 - [x] Command channel: varint length, protobuf message, JSON payload; connect, cast, heartbeat, stop, key frame request
 - [x] Video (H.264, SPS and PPS apart) and sound (AAC with ADTS) over TCP, `--format screenshare --host IP:PORT [--pin CODE]`
 - [x] Find panels with mDNS (`_sspcast._tcp`) next to the Chromecasts; choosing one casts in this format
-- [x] Reconnect after a loss
+- [x] Reconnect after a loss; a refusal on the panel ends the cast
+- [x] Menu: Enter on a panel asks for the code it shows, then counts down while someone allows the cast on the panel (90 s)
+- [x] Menu: bitrate, dropped frames and live audio delay for a panel too
 
 To do:
 
@@ -50,6 +52,8 @@ To do:
 - [ ] SSDP discovery, only if a panel does not answer mDNS
 - [ ] Touchback: touches on the panel drive the PC (UDP events, injected through the RemoteDesktop portal)
 - [ ] Follow the panel's size and frame rate requests, and its bitrate
+- [ ] Menu: show "Screenshare" as the format when a panel is selected, grey out the rows that do not apply (latency, receiver)
+- [ ] Keep the panel connection between two casts, if a real panel asks for approval again each time
 
 ## HLS
 

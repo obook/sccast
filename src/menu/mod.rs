@@ -7,6 +7,7 @@
 //! Date: October 2026
 //! Licence: MIT
 
+mod code;
 mod draw;
 mod live;
 mod panel;
@@ -88,6 +89,8 @@ pub struct Menu {
     chosen_resolution: Option<(u32, u32)>,
     /// Sound source of the running cast, for the live audio delay.
     audio_pad: Option<gstreamer::Pad>,
+    /// Panel whose code is being typed, and the code so far.
+    code_entry: Option<(CastDevice, String)>,
 }
 
 impl Menu {
@@ -117,6 +120,7 @@ impl Menu {
             live: Live::default(),
             chosen_resolution: None,
             audio_pad: None,
+            code_entry: None,
         }
     }
 
@@ -259,6 +263,22 @@ impl Menu {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
+            let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+            if let Some((panel, typed)) = self.code_entry.as_mut().filter(|_| !ctrl_c) {
+                match code::key(typed, key.code) {
+                    code::Typed::Editing => self.status = Status::Info(code::prompt(&panel.name, typed)),
+                    code::Typed::Cancelled => {
+                        self.code_entry = None;
+                        self.status = Status::Info("Choose a device, then Enter".into());
+                    }
+                    code::Typed::Done => {
+                        let (panel, typed) = self.code_entry.take().expect("code entry");
+                        s.pin = (!typed.is_empty()).then_some(typed);
+                        return Ok(Action::Cast(panel));
+                    }
+                }
+                continue;
+            }
             let count = if self.on_settings { ROWS.len() } else { self.devices.len() };
             let state = if self.on_settings { &mut self.row } else { &mut self.device };
             match key.code {
@@ -285,9 +305,15 @@ impl Menu {
                 KeyCode::Char('r') => self.scan(),
                 KeyCode::Enter => {
                     let list = self.list();
-                    if let Some(device) = self.device.selected().and_then(|i| list.get(i)) {
-                        return Ok(Action::Cast((*device).clone()));
+                    let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
+                    if device.kind == discovery::Kind::Screenshare {
+                        // The panel may show a code to type first; the last one is offered again.
+                        let typed = s.pin.clone().unwrap_or_default();
+                        self.status = Status::Info(code::prompt(&device.name, &typed));
+                        self.code_entry = Some((device, typed));
+                        continue;
                     }
+                    return Ok(Action::Cast(device));
                 }
                 _ => {}
             }
