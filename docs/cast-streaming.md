@@ -38,8 +38,7 @@ error.
   key frame, at most every 2 s, and down one step after 30 s without
   trouble. It travels in an RTP extension on the first packet of the frame
   after a change, the same on both streams, if the ANSWER accepts
-  `adaptive_playout_delay`. On every frame, the Sharp played the sound
-  about 1.5 s late.
+  `adaptive_playout_delay`, as openscreen does.
   Otherwise it stays at 100 ms. The Sharp applies it (stopwatch photos
   below), though its feedback keeps reporting the OFFER's 100 ms.
 - A session is lost when the control connection drops, the TV closes it, or

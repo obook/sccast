@@ -89,9 +89,7 @@ pub struct RtpStream {
     pub rtt: Option<Duration>,
     /// Playout delay in ms; None when the receiver did not accept the extension.
     pub playout_delay: Option<u16>,
-    /// The next frame carries the new delay. Only that one, as openscreen does: with the
-    /// extension on every frame the Sharp played the sound about 1.5 s late, about 250 ms
-    /// once sent on changes only (by eye, 2026-10-21).
+    /// The next frame carries the new delay. Only that one, as openscreen does.
     delay_changed: bool,
 }
 
