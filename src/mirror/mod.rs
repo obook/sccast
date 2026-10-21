@@ -149,7 +149,9 @@ pub fn cast(device: &Device, s: &menu::Settings, screen: &ScreenCast, stop: &'st
     };
     let result = reconnecting(receiver, device, s, screen, stop, out, &session_id);
     stop.store(true, Ordering::SeqCst);
+    tracing::info!("mirroring ended: closing the receiver");
     let _ = closer.join();
+    tracing::info!("mirroring receiver closed by sccast");
     result.map(|()| true)
 }
 

@@ -59,6 +59,7 @@ fn drive_menu(
                 menu::Action::Quit
             }
         };
+        tracing::info!(action = action.name(), "menu action");
         if let menu::Action::PickScreen = action {
             pick_screen(&menu, &screen, s.touchback);
             continue;
@@ -74,7 +75,9 @@ fn drive_menu(
             let _ = menu.draw_now(terminal, s);
             keep.store(keep_open, Ordering::SeqCst);
             stop.store(true, Ordering::SeqCst);
+            let started = Instant::now();
             wait_for(&cast);
+            tracing::info!(finished = cast.is_finished(), waited_ms = started.elapsed().as_millis() as u64, "cast thread stopped");
             menu.set_status(menu::Status::Ended);
         } else if !keep_open {
             // A receiver left open by s, on this TV or another one.
@@ -105,13 +108,20 @@ fn drive_menu(
         // The mirror format closes its own app, and a panel has no app: nothing left open to track.
         let tracked = settings.stream.format != cli::Format::Mirror && device.kind == device::discovery::Kind::Chromecast;
         *tv.lock().unwrap() = tracked.then(|| (device.clone(), settings.receiver.clone()));
-        let cast = std::thread::spawn(move || match cast_screen(&device, &settings, &screen, stop, Some(keep), &out) {
-            Ok(()) => out.send(menu::Status::Ended),
-            // The sharing may have been stopped from the desktop.
-            Err(e) if format!("{e:#}").contains("capture") => {
-                out.send(menu::Status::Error(format!("{e:#} (p: choose the screen again)")))
+        let cast = std::thread::spawn(move || {
+            let result = cast_screen(&device, &settings, &screen, stop, Some(keep), &out);
+            tracing::info!(ok = result.is_ok(), "cast thread: cast ended");
+            match result {
+                Ok(()) => out.send(menu::Status::Ended),
+                // The sharing may have been stopped from the desktop.
+                Err(e) if format!("{e:#}").contains("capture") => {
+                    out.send(menu::Status::Error(format!("{e:#} (p: choose the screen again)")))
+                }
+                Err(e) => out.send(menu::Status::Error(format!("{e:#}"))),
             }
-            Err(e) => out.send(menu::Status::Error(format!("{e:#}"))),
+            // Dropping the last copy of an old screen closes its portal session here.
+            drop(screen);
+            tracing::info!("cast thread: done");
         });
         running = Some((stop, keep, cast));
     }

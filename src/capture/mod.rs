@@ -158,7 +158,11 @@ fn poll_bus(bus: &gst::Bus, timeout: Duration) -> anyhow::Result<()> {
 
 impl Drop for Capture {
     fn drop(&mut self) {
+        // Timed: a stop that never ends shows in the log as a start without its end.
+        let started = std::time::Instant::now();
+        tracing::info!("capture stopping");
         let _ = self.pipeline.set_state(gst::State::Null);
+        tracing::info!(ms = started.elapsed().as_millis() as u64, "capture stopped");
     }
 }
 

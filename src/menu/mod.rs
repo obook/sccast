@@ -46,6 +46,18 @@ pub enum Action {
     Quit,
 }
 
+impl Action {
+    /// Short name for the log.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Action::Cast(_) => "cast",
+            Action::Stop => "stop",
+            Action::PickScreen => "pick screen",
+            Action::Quit => "quit",
+        }
+    }
+}
+
 /// Progress of the running cast, sent by its thread.
 pub enum Status {
     Info(String),
@@ -262,6 +274,10 @@ impl Menu {
             }
             terminal.draw(|f| self.draw(f, s))?;
             self.tick += 1;
+            // About once a minute: a frozen menu shows in the log as the end of these lines.
+            if self.tick.is_multiple_of(600) {
+                tracing::info!(casting = self.casting.is_some(), code_entry = self.code_entry.is_some(), "menu loop alive");
+            }
             if !event::poll(Duration::from_millis(100))? {
                 continue;
             }
@@ -269,6 +285,7 @@ impl Menu {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
+            tracing::info!(key = ?key.code, "key");
             let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
             if let Some((panel, typed)) = self.code_entry.as_mut().filter(|_| !ctrl_c) {
                 match code::key(typed, key.code) {
