@@ -33,7 +33,7 @@ To do:
 
 ## HLS
 
-sccast's receiver page and HTTP server: 2 to 3 s of delay.
+sccast's receiver page and HTTP server: about 3 s of delay.
 
 Done:
 
@@ -45,6 +45,7 @@ Done:
 - [x] Warning on the TV, top right: network too slow or frequent buffering
 - [x] The receiver page closes itself after 30 s of buffering (sccast gone, PC turned off)
 - [x] Continuous Matroska stream (`--format mkv`): 5 to 6 s of delay, kept as an option
+- [x] Latency 1.5 s by default: at 1 s the Sharp buffered as soon as the PC was in use
 
 To do:
 

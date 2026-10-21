@@ -11,7 +11,7 @@ playout delay stays at 100 ms.
 ## Result
 
 The TV shows the screen 153 ms after the PC (one photo, 1080p30,
-2,500 kbit/s). HLS: 2 to 3 s. Reading ms on a photo is rough: about 20 ms
+2,500 kbit/s). HLS: about 3 s. Reading ms on a photo is rough: about 20 ms
 of error.
 
 ## How it works

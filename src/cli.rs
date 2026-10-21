@@ -45,9 +45,10 @@ pub enum Command {
         /// Default Media Receiver CC1AD845 (about 5 s) if it does not start.
         #[arg(long, default_value = crate::device::SCCAST_RECEIVER)]
         receiver: String,
-        /// Seconds sccast's receiver stays behind live (default set by the receiver page).
-        #[arg(long)]
-        latency: Option<f64>,
+        /// Seconds sccast's receiver stays behind live. At 1 s the Sharp buffered as soon as the
+        /// PC was in use (2026-10-21); 1.5 s did not.
+        #[arg(long, default_value_t = 1.5)]
+        latency: f64,
         #[command(flatten)]
         stream: Stream,
     },

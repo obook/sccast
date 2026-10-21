@@ -14,7 +14,7 @@ use crate::device::{DEFAULT_MEDIA_RECEIVER, SCCAST_RECEIVER};
 pub struct Settings {
     pub stream: Stream,
     pub audio_delay: u64,
-    pub latency: Option<f64>,
+    pub latency: f64,
     pub receiver: String,
 }
 
@@ -28,7 +28,7 @@ const RESOLUTIONS: [(u32, u32); 3] = [(1920, 1080), (1280, 720), (854, 480)];
 const BITRATES: [u32; 6] = [1500, 2500, 4000, 6000, 8000, 10000];
 const FPS: [u32; 4] = [25, 30, 50, 60];
 /// None: the receiver page's default (1 s).
-const LATENCIES: [Option<f64>; 5] = [None, Some(1.5), Some(2.0), Some(3.0), Some(5.0)];
+const LATENCIES: [f64; 5] = [1.0, 1.5, 2.0, 3.0, 5.0];
 /// 50 ms steps near 0, to tune lip sync by ear during a cast.
 const AUDIO_DELAYS: [u64; 12] = [0, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500];
 /// Row of the audio delay, applied at once to a running cast.
@@ -77,7 +77,7 @@ pub(super) fn value(s: &Settings, row: usize) -> String {
         1 => format!("{}x{}", st.resolution.0, st.resolution.1),
         2 => format!("{} kbit/s", st.bitrate),
         3 => format!("{} fps", st.fps),
-        4 => s.latency.map_or("1 s (default)".to_string(), |l| format!("{l} s")),
+        4 => format!("{} s", s.latency),
         5 => if st.no_audio { "off" } else { "on" }.to_string(),
         6 => format!("{} ms", s.audio_delay),
         7 => match s.receiver.as_str() {

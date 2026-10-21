@@ -6,7 +6,7 @@ mirroring, the one Chrome and Brave use: about 0.15 s of delay on the TV.
 
 On a device without screen mirroring, sccast casts in HLS instead, served
 over HTTP on your local network and played by sccast's own receiver page:
-2 to 3 seconds of delay, about 5 if sccast falls back to Google's receiver.
+about 3 seconds of delay, about 5 if sccast falls back to Google's receiver.
 `--format hls` always uses HLS.
 
 ## Requirements
@@ -114,7 +114,7 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--port N` | `8090` | HTTP port the TV fetches the HLS stream from |
 | `--no-audio` | | Video only |
 | `--format mirror` | `mirror` | Google's screen mirroring, H.264 and Opus over RTP, about 0.15 s of delay. HLS on a device without it |
-| `--format hls` | | 1-second HLS segments, 2 to 3 s of delay. `serve`, `--url` and `--file` always use it |
+| `--format hls` | | 1-second HLS segments, about 3 s of delay. `serve`, `--url` and `--file` always use it |
 | `--format mkv` | | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
 | `--audio-delay MS` | `0` | Delays the sound on the TV (`cast` only). The menu changes it during a cast |
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
@@ -126,8 +126,8 @@ Screen mirroring uses Google's mirroring receiver (`0F5096E8`), built into
 the devices. In HLS, the TV runs sccast's receiver: the page in
 `docs/receiver/`, served at <https://obook.github.io/sccast/receiver/> and
 published in the Google Cast console as application `8FE12008`. It plays
-1 second behind the newest segment, against 3 for Google's Default Media
-Receiver.
+1.5 seconds behind the newest segment, against 3 for Google's Default Media
+Receiver. At 1 second, a Sharp TV buffered as soon as the PC was in use.
 
 If it does not start, `sccast` falls back to the Default Media Receiver
 (about 5 seconds of delay) and says so. A device may not know the
@@ -135,7 +135,7 @@ application until it has been restarted once.
 
 | Option | Effect |
 |---|---|
-| `--latency SECONDS` | Delay behind the newest segment for sccast's receiver |
+| `--latency SECONDS` | Delay behind the newest segment for sccast's receiver, `1.5` by default |
 | `--receiver CC1AD845` | Always use the Default Media Receiver |
 | `--receiver ID` | Use your own receiver, registered in the [Cast console](https://cast.google.com/publish) |
 
@@ -184,8 +184,8 @@ Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
 
 - Mirror: tested on one TV and one Nest Hub. `--latency` and `--receiver`
   do not apply. See [docs/cast-streaming.md](docs/cast-streaming.md).
-- HLS: 2 to 3 seconds of latency, as the stream is cut into 1-second
-  segments and the receiver plays 1 second behind the newest one. The TV
+- HLS: about 3 seconds of latency, as the stream is cut into 1-second
+  segments and the receiver plays 1.5 seconds behind the newest one. The TV
   loads sccast's receiver from GitHub Pages, so it needs internet access.
 
 ## Roadmap

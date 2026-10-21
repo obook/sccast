@@ -161,10 +161,7 @@ pub fn cast_screen(
 /// Query of the stream URL, read by sccast's receiver page; the server ignores it.
 /// kbps lets the page tell a network too slow for the stream.
 fn stream_query(s: &menu::Settings) -> String {
-    let mut query = vec![format!("kbps={}", s.stream.bitrate)];
-    if let Some(latency) = s.latency {
-        query.push(format!("latency={latency}"));
-    }
+    let mut query = vec![format!("kbps={}", s.stream.bitrate), format!("latency={}", s.latency)];
     if cfg!(debug_assertions) {
         query.push("debug".to_string());
     }
