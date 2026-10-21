@@ -1,7 +1,11 @@
 # Screen mirroring (`--format mirror`, the default)
 
-Tested on the Sharp TV (Android TV), 2026-10-20. A Nest Hub accepted a
-session once, video and sound, for 5 s: not tested further.
+Tested on the Sharp TV (Android TV), 2026-10-20, and a Nest Hub,
+2026-10-21.
+
+The Nest Hub takes 1080p and scales it down itself. Its ANSWER gives its
+screen (`display.dimensions`: 1280x720, 30 fps, `scaling: receiver`) and
+no `rtpExtensions`: its playout delay stays at 100 ms.
 
 ## Result
 
@@ -13,8 +17,8 @@ error.
 
 - sccast launches Google's mirroring receiver (`0F5096E8`) and sends an OFFER
   on `urn:x-cast:com.google.cast.webrtc`. The TV answers with a UDP port.
-  If it refuses the video, sccast sends a second OFFER at 1280x720 (a Nest
-  Hub refuses 1080p), then gives up. The whole ANSWER goes to the log.
+  If it refuses the video, sccast sends a second OFFER at 1280x720, then
+  gives up. The whole ANSWER goes to the log.
 - No sender check: any program can do it, not only Chrome.
 - H.264 and Opus frames are encrypted (AES-128-CTR) and sent over RTP.
 - A Sender Report every 100 ms lets the TV time the frames.
@@ -66,7 +70,7 @@ only reads files.
 
 ## Not done
 
-- Other devices: the school Chromecast, a Nest Hub beyond the 5 s above.
+- Other devices: the school Chromecast.
 - The HLS fallback on a device without mirroring.
 - A firewall on the PC (ufw, firewalld).
 - The OFFER goes to the broadcast address `*` (rust_cast has no other way):

@@ -51,7 +51,8 @@ const H264_PAYLOAD: u8 = 101;
 const OPUS_PAYLOAD: u8 = 96;
 const AUDIO_BITRATE: u32 = 128_000;
 const REPORT_INTERVAL: Duration = Duration::from_millis(100);
-/// Offered again when the receiver refuses the video: a Nest Hub refuses 1080p and takes 720p.
+/// Offered again when the receiver refuses the video. No device seen refusing yet: a Nest Hub
+/// refuses 1080p in HLS but takes it in mirror (2026-10-21).
 const SMALLER_VIDEO: (u32, u32) = (1280, 720);
 /// The receiver repeats its key frame request in each report until one arrives.
 const KEY_FRAME_SPACING: Duration = Duration::from_secs(1);

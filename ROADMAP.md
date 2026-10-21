@@ -16,10 +16,11 @@ Done:
 - [x] Mirror by default, HLS on a device without it
 - [x] Reconnect when the TV drops the session or stops answering (TV network cut for 20 s)
 - [x] Raise the playout delay from 100 to 400 ms on losses, lower it when calm
+- [x] Test on a Nest Hub: takes 1080p and scales it to its 1280x720 screen, no adaptive delay
 
 To do:
 
-- [ ] Test on the school Chromecast and on a Nest Hub (one accepted a 5 s session; sccast now retries at 720p after a refusal)
+- [ ] Test on the school Chromecast
 - [ ] Test the HLS fallback on a device without mirroring
 - [ ] Test with a firewall on (ufw, firewalld)
 - [ ] Check that the TV applies the adaptive playout delay (the Sharp accepts it, still reports 100 ms)
