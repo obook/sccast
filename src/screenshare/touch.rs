@@ -109,20 +109,10 @@ impl Drop for Touchback {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Button {
-    Left,
-    Right,
-}
+pub enum Button { Left, Right }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Action {
-    Press(Button),
-    Release(Button),
-    Move,
-    Click(Button),
-    DoubleClick,
-    Wheel,
-}
+pub enum Action { Press(Button), Release(Button), Move, Click(Button), DoubleClick, Wheel }
 
 /// One touch. Which of the two coordinate pairs the Windows client uses, and in which unit
 /// (screen pixels or 0 to 1), is unverified: both are kept.

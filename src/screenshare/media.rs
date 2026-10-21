@@ -41,6 +41,7 @@ pub struct Link {
 impl Link {
     fn lose(&self, why: String) {
         tracing::warn!(%why, "media connection lost");
+        super::trace::line(&format!("media connection lost: {why}"));
         self.lost.lock().unwrap().get_or_insert(why);
     }
 
@@ -137,6 +138,7 @@ pub fn send_frames(
     Ok(std::thread::spawn(move || {
         let (mut pending, mut gate, mut rate) = (Vec::new(), Gate::default(), Rate::new(bitrate));
         let mut stalled_since: Option<Instant> = None;
+        let mut traced = 0;
         while !ended.load(Ordering::SeqCst) {
             if let Err(e) = flush(&mut socket, &mut pending) {
                 link.lose(format!("{name}: {}", cause(&e)));
@@ -177,6 +179,12 @@ pub fn send_frames(
             for part in parts {
                 let kind = if video { 0 } else { started.elapsed().as_millis() as i32 };
                 let frame = media_frame(index, kind, part);
+                // The first frames show in the trace how the panel gets them.
+                if video && traced < 3 {
+                    traced += 1;
+                    let head: Vec<String> = frame.iter().take(20).map(|b| format!("{b:02x}")).collect();
+                    super::trace::line(&format!("{name} frame {} bytes, starts {}", frame.len(), head.join(" ")));
+                }
                 link.sent.fetch_add(frame.len() as u64, Ordering::Relaxed);
                 pending.extend_from_slice(&frame);
                 index = index.map(|i| i.wrapping_add(1));

@@ -86,6 +86,8 @@ sccast cast --device "Kitchen" --resolution 1280x720
 sccast cast --device "Kitchen" --file movie.mp4
 sccast stop --device "Kitchen"               # close a cast left running
 sccast serve                                 # local stream, no TV
+sccast cast --format screenshare --pin 0A1B2C  # interactive panel, by its code
+sccast pin 0A1B2C                            # the address a panel's code gives
 ```
 
 ![The sccast menu during a cast](media/menu.png)

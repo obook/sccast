@@ -20,7 +20,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// List Chromecast devices on the local network.
+    /// Show the address an interactive panel's code gives, without connecting.
+    Pin {
+        /// The 6-character code shown on the panel.
+        code: String,
+    },
+    /// List Chromecast devices and interactive panels on the local network.
     List {
         /// Discovery duration in seconds.
         #[arg(long, default_value_t = 8)]

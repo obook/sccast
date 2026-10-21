@@ -11,12 +11,12 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 /// Command port, chosen by 2 bits of the code.
-const PORTS: [u16; 4] = [7385, 29736, 2067, 39458];
+pub const PORTS: [u16; 4] = [7385, 29736, 2067, 39458];
 
 /// Panel address from its code, or why the code cannot give one.
-pub fn decode(code: &str) -> Result<SocketAddrV4, String> {
-    let code: String = code
-        .trim()
+pub fn decode(typed: &str) -> Result<SocketAddrV4, String> {
+    let typed = typed.trim();
+    let code: String = typed
         .to_ascii_uppercase()
         .chars()
         .map(|c| match c {
@@ -30,7 +30,7 @@ pub fn decode(code: &str) -> Result<SocketAddrV4, String> {
     if code.len() != 6 {
         return Err(format!("the panel code has 6 characters, not {}", code.len()));
     }
-    let bad = || format!("{code} is not a panel code");
+    let bad = || format!("{typed} is not a panel code");
     let byte = |v: u32, shift: u32| (v >> shift) as u8;
     // Six digits: a 192.168.x.x address.
     if code.chars().all(|c| c.is_ascii_digit()) {
@@ -58,7 +58,7 @@ pub fn decode(code: &str) -> Result<SocketAddrV4, String> {
             let ip = Ipv4Addr::new(172, (b & 0x0f) | 0x10, m ^ byte(v, 8), m ^ byte(v, 0));
             Ok(SocketAddrV4::new(ip, PORTS[(v >> 20) as usize & 3]))
         }
-        _ => Err(format!("the code {code} needs the vendor's cloud service: give the panel's address with --host")),
+        _ => Err(format!("the code {typed} needs the vendor's cloud service: give the panel's address with --host")),
     }
 }
 

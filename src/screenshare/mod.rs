@@ -8,16 +8,17 @@
 //! Licence: MIT
 
 mod approval;
+mod commands;
 mod media;
 pub mod pin;
 mod touch;
+pub mod trace;
 mod wire;
 
-use std::io;
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::net::{Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use serde_json::{json, Value};
@@ -26,8 +27,8 @@ use crate::capture::{request_key_frame, Capture, ScreenCast};
 use crate::menu::{Settings, Status};
 use crate::session::Out;
 use approval::{Refused, APPROVAL_TIMEOUT};
+use commands::{now_ms, Commands, ANSWER_TIMEOUT};
 use media::send_frames;
-use wire::{read_message, write_message, ScreenshareMessage};
 
 /// (commandType, commandId) pairs, from the sender's ProtocolConstant.
 const HEARTBEAT: (i32, i32) = (0, 0);
@@ -45,84 +46,18 @@ const INDEX_VERSION: i32 = 63;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
 /// The Android sender gives up after three read timeouts of 10 s.
 const SILENCE: Duration = Duration::from_secs(30);
-/// TCP connections and writes; the answers wait for a person (approval.rs).
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Command channel: writes here, a thread reads into `incoming`.
-struct Commands {
-    socket: TcpStream,
-    sequence: i32,
-    incoming: mpsc::Receiver<io::Result<ScreenshareMessage>>,
-}
-
-impl Commands {
-    fn open(host: SocketAddr) -> anyhow::Result<Self> {
-        let socket = TcpStream::connect_timeout(&host, ANSWER_TIMEOUT).with_context(|| format!("cannot reach {host}"))?;
-        socket.set_nodelay(true)?;
-        // A heartbeat must not block on a dead link.
-        socket.set_write_timeout(Some(ANSWER_TIMEOUT))?;
-        let mut reader = socket.try_clone()?;
-        let (tx, incoming) = mpsc::channel();
-        std::thread::spawn(move || loop {
-            let message = read_message(&mut reader);
-            let failed = message.is_err();
-            if tx.send(message).is_err() || failed {
-                break;
-            }
-        });
-        Ok(Self { socket, sequence: 0, incoming })
-    }
-
-    fn send(&mut self, (command_type, command_id): (i32, i32), payload: &Value) -> io::Result<()> {
-        self.sequence += 1;
-        self.reply((command_type, command_id), self.sequence, payload)
-    }
-
-    /// Send with a given sequence: an answer repeats its request's.
-    fn reply(&mut self, (command_type, command_id): (i32, i32), sequence: i32, payload: &Value) -> io::Result<()> {
-        let (timestamp, payload) = (now_ms(), payload.to_string());
-        write_message(&mut self.socket, &ScreenshareMessage { version: 1, command_type, command_id, sequence, timestamp, payload })
-    }
-
-    /// Wait for `wanted`, as long as someone may take to allow it on the panel; return its
-    /// version and JSON payload. None at `stop`. `countdown` gets the seconds left, once a second.
-    fn wait(&self, wanted: (i32, i32), stop: &AtomicBool, countdown: &dyn Fn(u64)) -> anyhow::Result<Option<(i32, Value)>> {
-        let deadline = Instant::now() + APPROVAL_TIMEOUT;
-        let mut shown = None;
-        while !stop.load(Ordering::SeqCst) {
-            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-                return Err(Refused("no answer from the panel in 90 s (nobody allowed the cast?)".into()).into());
-            };
-            if shown != Some(left.as_secs()) {
-                shown = Some(left.as_secs());
-                countdown(left.as_secs() + 1);
-            }
-            let m = match self.incoming.recv_timeout(Duration::from_millis(200)) {
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                other => other.context("the panel closed the connection")??,
-            };
-            tracing::debug!(t = m.command_type, id = m.command_id, payload = %m.payload, "panel message");
-            if (m.command_type, m.command_id) == wanted {
-                return Ok(Some((m.version, serde_json::from_str(&m.payload).unwrap_or(Value::Null))));
-            }
-        }
-        Ok(None)
-    }
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
-}
 
 /// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again; after a
 /// refusal, stop.
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
+    trace::line(&format!("sccast {} casting to {name} at {host}, {:?}", env!("CARGO_PKG_VERSION"), s.stream.resolution));
     // A first failure is a wrong address or a refusal: report it.
-    let mut why = session(host, name, s, screen, stop, out)?;
+    let mut why = session(host, name, s, screen, stop, out).inspect_err(|e| trace::line(&format!("failed: {e:#}")))?;
     // Up to 3 times in 5 min from the terminal, without limit from the menu, as mirror.
     let mut drops = crate::device::Drops::new(matches!(out, Out::Menu(_)));
     while let Some(lost) = why {
         tracing::warn!(%lost, %host, "panel lost");
+        trace::line(&format!("lost: {lost}"));
         let count = drops.count(name, &lost)?;
         out.report(crate::device::Report::Reconnecting);
         out.say(&format!("Lost {name} ({lost}). Reconnecting to the panel ({count})..."));
@@ -131,7 +66,10 @@ pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, sto
             break;
         }
         why = match session(host, name, s, screen, stop, out) {
-            Err(e) if e.is::<Refused>() => return Err(e),
+            Err(e) if e.is::<Refused>() => {
+                trace::line(&format!("failed: {e:#}"));
+                return Err(e);
+            }
             other => other.unwrap_or_else(|e| Some(format!("{e:#}"))),
         };
     }

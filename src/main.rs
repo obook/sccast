@@ -108,6 +108,13 @@ fn main() -> anyhow::Result<()> {
             let screen = capture::ScreenCast::open(settings.touchback)?;
             session::cast_screen(&device, &settings, &screen, stop, None, &out)
         }
+        Command::Pin { code } => {
+            let address = screenshare::pin::decode(&code).map_err(anyhow::Error::msg)?;
+            let index = screenshare::pin::PORTS.iter().position(|p| *p == address.port()).unwrap_or_default();
+            println!("{}\tport {} (index {index} of 0-3)", address.ip(), address.port());
+            println!("protocol trace of the casts: {}", screenshare::trace::path().display());
+            Ok(())
+        }
         Command::Stop { device, receiver: app_id } => {
             let device = pick_device(device.as_deref())?;
             if !device::stop(&device, &app_id, None)? {

@@ -97,6 +97,14 @@ or no answer ends the cast without reconnecting. Cast answer codes, from the
 Android sender's action names: -100 failure, -101 too many devices, -102
 refused, -103 panel not ready. The panel's own texts are not decoded.
 
+Test on site. `sccast pin CODE` prints the address a code gives, without
+connecting, to compare with the panel's network settings. Each panel cast
+writes a protocol trace to `~/.local/state/sccast/screenshare.log`, kept
+after logout and started over at each run: connection attempts (sccast
+tries the 4 command ports when the first does not answer), every command
+sent and received with its JSON (cut at 500 characters), the first 3 video
+frames, and each loss with its cause.
+
 Losses and delay. At school the vendor's own app often loses the panels,
 so sccast plans for it:
 - After a loss (EOF, RST, a write error, nothing read for 30 s, or 10 s
