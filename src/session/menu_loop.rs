@@ -7,6 +7,7 @@
 //! Date: October 2026
 //! Licence: MIT
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -29,12 +30,16 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     let screen = ScreenCast::open(settings.touchback)?;
     let mut terminal = ratatui::init();
     let stderr_to_log = crate::MENU_LOG.get().and_then(|file| super::terminal::StderrToFile::new(file).ok());
-    let result = drive_menu(&mut terminal, &mut settings, screen, quit);
+    // A panic's message went to the log with stderr: caught here, to say where it is.
+    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drive_menu(&mut terminal, &mut settings, screen, quit)));
     // Stderr back first: a final error must reach the user.
     drop(stderr_to_log);
     // Not restore(): its eprintln! panics when the terminal was closed.
     let _ = ratatui::try_restore();
-    result
+    run.unwrap_or_else(|panic| {
+        let _ = writeln!(std::io::stderr(), "sccast stopped on an internal error: see {}", crate::log_path().display());
+        std::panic::resume_unwind(panic)
+    })
 }
 
 fn drive_menu(
@@ -174,10 +179,11 @@ fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>, touchbac
         out.say("Choose the screen in the dialog...");
         match ScreenCast::open(touchback) {
             Ok(opened) => {
-                let said = match (touchback, opened.input().is_some()) {
-                    (false, _) => "Screen changed: Enter casts it.",
-                    (true, true) => "Screen and pointer granted: touchback on. Enter casts it.",
-                    (true, false) => "Screen changed, but the pointer was not granted: touchback off.",
+                // A refused pointer is in the note.
+                let said = if opened.input().is_some() {
+                    "Screen and pointer granted: touchback on. Enter casts it."
+                } else {
+                    "Screen changed: Enter casts it."
                 };
                 let said = opened.note().unwrap_or_else(|| said.to_string());
                 *slot.lock().unwrap() = Arc::new(opened);

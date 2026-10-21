@@ -121,6 +121,7 @@ mod tests {
             // Written to descriptor 2 itself, as a C library does.
             std::io::stderr().write_all(b"Xlib: extension missing\n").unwrap();
         }
-        assert_eq!(std::fs::read_to_string(log.path()).unwrap(), "Xlib: extension missing\n");
+        // Other tests run at the same time and may write to stderr too: look for ours only.
+        assert!(std::fs::read_to_string(log.path()).unwrap().contains("Xlib: extension missing\n"));
     }
 }

@@ -9,15 +9,12 @@
 //! Date: October 2026
 //! Licence: MIT
 
-use std::sync::Arc;
-
 use ashpd::desktop::remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop, SelectDevicesOptions};
 use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
 use ashpd::desktop::Session;
 use ashpd::enumflags2::BitFlags;
-use tokio::runtime::Runtime;
 
-use super::portal::describe;
+use super::portal::{close, describe, runtime};
 
 /// Linux input codes of the left and right buttons (BTN_LEFT, BTN_RIGHT).
 const BUTTONS: [i32; 2] = [0x110, 0x111];
@@ -35,7 +32,6 @@ pub struct Input {
     offset: (f64, f64),
     /// Size of the shared monitor, in the desktop's logical pixels.
     pub size: (f64, f64),
-    runtime: Arc<Runtime>,
 }
 
 /// The stream of `streams` (node, rectangle) that contains `monitor`, and the monitor's offset in it.
@@ -51,7 +47,7 @@ impl Input {
     /// Open the RemoteDesktop session (KDE asks to allow remote control) for `monitor`, the
     /// shared screen. None, logged, when the desktop has no such portal, refuses the pointer,
     /// or gives no stream that contains the monitor.
-    pub(super) async fn open(monitor: Rect, runtime: &Arc<Runtime>) -> Option<Self> {
+    pub(super) async fn open(monitor: Rect) -> Option<Self> {
         let opened = async {
             let proxy = RemoteDesktop::new().await?;
             let session = proxy.create_session(Default::default()).await?;
@@ -67,6 +63,7 @@ impl Input {
         describe("pointer", started.streams());
         if !started.devices().contains(DeviceType::Pointer) {
             tracing::warn!("the desktop did not grant the pointer: touchback off");
+            close(&session, "pointer").await;
             return None;
         }
         let streams: Vec<(u32, Rect)> = started
@@ -76,17 +73,18 @@ impl Input {
             .collect();
         let Some((stream, offset)) = containing(monitor, &streams) else {
             tracing::warn!(?monitor, "no pointer stream contains the shared screen: touchback off");
+            close(&session, "pointer").await;
             return None;
         };
         tracing::info!(stream, ?offset, "touchback on");
         let size = (f64::from(monitor.1 .0), f64::from(monitor.1 .1));
-        Some(Self { proxy, session, stream, offset, size, runtime: Arc::clone(runtime) })
+        Some(Self { proxy, session, stream, offset, size })
     }
 
     /// Move the pointer to (`x`, `y`) of the shared monitor.
     pub fn move_to(&self, x: f64, y: f64) {
         let (x, y) = (x + self.offset.0, y + self.offset.1);
-        let sent = self.runtime.block_on(self.proxy.notify_pointer_motion_absolute(&self.session, self.stream, x, y, Default::default()));
+        let sent = runtime().block_on(self.proxy.notify_pointer_motion_absolute(&self.session, self.stream, x, y, Default::default()));
         log_failure(sent);
     }
 
@@ -94,14 +92,20 @@ impl Input {
     pub fn button(&self, right: bool, pressed: bool) {
         let state = if pressed { KeyState::Pressed } else { KeyState::Released };
         let button = BUTTONS[usize::from(right)];
-        let sent = self.runtime.block_on(self.proxy.notify_pointer_button(&self.session, button, state, Default::default()));
+        let sent = runtime().block_on(self.proxy.notify_pointer_button(&self.session, button, state, Default::default()));
         log_failure(sent);
     }
 
     /// Scroll by `steps` wheel notches, down when positive.
     pub fn wheel(&self, steps: i32) {
-        let sent = self.runtime.block_on(self.proxy.notify_pointer_axis_discrete(&self.session, Axis::Vertical, steps, Default::default()));
+        let sent = runtime().block_on(self.proxy.notify_pointer_axis_discrete(&self.session, Axis::Vertical, steps, Default::default()));
         log_failure(sent);
+    }
+}
+
+impl Drop for Input {
+    fn drop(&mut self) {
+        runtime().block_on(close(&self.session, "pointer"));
     }
 }
 
