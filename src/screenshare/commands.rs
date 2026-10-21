@@ -8,7 +8,7 @@
 //! Licence: MIT
 
 use std::io;
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -91,7 +91,7 @@ impl Commands {
         std::thread::spawn(move || loop {
             let message = read_message(&mut reader);
             match &message {
-                Ok(m) => trace::command("<-", m.command_type, m.command_id, m.sequence, &m.payload),
+                Ok(read) => trace::command("<-", read.command_type, read.command_id, read.sequence, &read.payload),
                 Err(e) => trace::line(&format!("<- {}", cause(e))),
             }
             let failed = message.is_err();
@@ -142,13 +142,18 @@ impl Commands {
                 trace::line(&format!("no answer to {wanted:?} after 10 s: waiting for Allow on the panel, or it does not speak this protocol"));
             }
             self.keep_alive().context("the panel closed the connection")?;
-            let m = match self.incoming.recv_timeout(Duration::from_millis(200)) {
+            let message = match self.incoming.recv_timeout(Duration::from_millis(200)) {
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 other => other.context("the panel closed the connection")??,
             };
-            match (m.command_type, m.command_id) {
-                ids if ids == wanted => return Ok(Some((m.version, serde_json::from_str(&m.payload).unwrap_or(Value::Null)))),
-                DISCONNECTED | CAST_STOPPED => return Err(Refused::new(format!("the panel ended the session: {}", m.payload)).into()),
+            match (message.command_type, message.command_id) {
+                ids if ids == wanted => {
+                    let payload = serde_json::from_str(&message.payload).unwrap_or(Value::Null);
+                    return Ok(Some((message.version, payload)));
+                }
+                DISCONNECTED | CAST_STOPPED => {
+                    return Err(Refused::new(format!("the panel ended the session: {}", message.payload)).into());
+                }
                 _ => {}
             }
         }
@@ -160,6 +165,31 @@ impl Drop for Commands {
     fn drop(&mut self) {
         let _ = self.socket.shutdown(Shutdown::Both);
     }
+}
+
+/// Connect request, with the fields the Windows client fills (keys from its builder; both
+/// spellings of the code appear there). Which ones the panel needs is unverified. Hypothesis:
+/// deviceType 5, written by the Windows client, stands for a PC (the Android sender writes 1).
+/// The device id stays the same across reconnections and runs: derived from the machine-id,
+/// which must not leave the PC as is (systemd says so), so hashed with sccast's name.
+pub fn connect_request(pin: Option<&str>, local_ip: IpAddr) -> Value {
+    let read = |path| std::fs::read_to_string(path).map(|text| text.trim().to_string()).ok().filter(|text| !text.is_empty());
+    let name = read("/etc/hostname").unwrap_or_else(|| "sccast".to_string());
+    let machine_id = read("/etc/machine-id").unwrap_or_else(|| name.clone());
+    let uuid = format!("{:016x}", fnv1a(&format!("sccast {machine_id}")));
+    let pin = pin.unwrap_or("");
+    json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": 5, "connectType": 0,
+        "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "originIp": local_ip.to_string(),
+        "supportMultiTouch": false, "supportPen": false, "functions": [], "systemName": "Linux"})
+}
+
+/// FNV-1a, 64 bits: a hash that stays the same across Rust versions, unlike the std one.
+fn fnv1a(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn now_ms() -> i64 {

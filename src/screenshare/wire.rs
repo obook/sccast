@@ -116,9 +116,9 @@ impl ScreenshareMessage {
     }
 }
 
-/// Write `m` with its varint length, in one write.
-pub fn write_message(output: &mut impl Write, m: &ScreenshareMessage) -> io::Result<()> {
-    let body = m.encode();
+/// Write `message` with its varint length, in one write.
+pub fn write_message(output: &mut impl Write, message: &ScreenshareMessage) -> io::Result<()> {
+    let body = message.encode();
     let mut frame = Vec::with_capacity(body.len() + 5);
     put_varint(&mut frame, body.len() as u64);
     frame.extend(body);

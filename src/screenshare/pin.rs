@@ -16,47 +16,48 @@ pub const PORTS: [u16; 4] = [7385, 29736, 2067, 39458];
 /// Panel address from its code, or why the code cannot give one.
 pub fn decode(typed: &str) -> Result<SocketAddrV4, String> {
     let typed = typed.trim();
+    // W, X, Y and Z stand for characters a person could misread.
     let code: String = typed
         .to_ascii_uppercase()
         .chars()
-        .map(|c| match c {
+        .map(|character| match character {
             'W' => '0',
             'X' => '1',
             'Y' => 'I',
             'Z' => 'O',
-            c => c,
+            other => other,
         })
         .collect();
     if code.len() != 6 {
         return Err(format!("the panel code has 6 characters, not {}", code.len()));
     }
     let bad = || format!("{typed} is not a panel code");
-    let byte = |v: u32, shift: u32| (v >> shift) as u8;
+    let byte = |value: u32, shift: u32| (value >> shift) as u8;
     // Six digits: a 192.168.x.x address.
-    if code.chars().all(|c| c.is_ascii_digit()) {
-        let v: u32 = code.parse().map_err(|_| bad())?;
-        let ip = Ipv4Addr::new(192, 168, byte(v, 0), byte(v, 8));
-        return Ok(SocketAddrV4::new(ip, PORTS[(v >> 16) as usize & 3]));
+    if code.chars().all(|character| character.is_ascii_digit()) {
+        let value: u32 = code.parse().map_err(|_| bad())?;
+        let ip = Ipv4Addr::new(192, 168, byte(value, 0), byte(value, 8));
+        return Ok(SocketAddrV4::new(ip, PORTS[(value >> 16) as usize & 3]));
     }
-    let v = u32::from_str_radix(&code, 32).map_err(|_| bad())?;
-    match (v >> 28) & 3 {
+    let value = u32::from_str_radix(&code, 32).map_err(|_| bad())?;
+    match (value >> 28) & 3 {
         // 10.x.x.x, each byte masked with a 2-bit key.
         3 => {
-            let k = byte(v, 26) & 3;
-            let m = k ^ (k << 4);
-            let ip = Ipv4Addr::new(10, m ^ byte(v, 16), m ^ byte(v, 8), m ^ byte(v, 0));
-            Ok(SocketAddrV4::new(ip, PORTS[(v >> 24) as usize & 3]))
+            let key = byte(value, 26) & 3;
+            let mask = key ^ (key << 4);
+            let ip = Ipv4Addr::new(10, mask ^ byte(value, 16), mask ^ byte(value, 8), mask ^ byte(value, 0));
+            Ok(SocketAddrV4::new(ip, PORTS[(value >> 24) as usize & 3]))
         }
         // 172.16.0.0/12, masked with a 4-bit key; 2 bits of the key are repeated as a check.
         2 => {
-            let (u, b) = (byte(v, 24), byte(v, 16));
-            if u & 3 != b >> 6 {
+            let (key_byte, second_byte) = (byte(value, 24), byte(value, 16));
+            if key_byte & 3 != second_byte >> 6 {
                 return Err(bad());
             }
-            let k = u & 0x0f;
-            let m = k ^ (k << 4);
-            let ip = Ipv4Addr::new(172, (b & 0x0f) | 0x10, m ^ byte(v, 8), m ^ byte(v, 0));
-            Ok(SocketAddrV4::new(ip, PORTS[(v >> 20) as usize & 3]))
+            let key = key_byte & 0x0f;
+            let mask = key ^ (key << 4);
+            let ip = Ipv4Addr::new(172, (second_byte & 0x0f) | 0x10, mask ^ byte(value, 8), mask ^ byte(value, 0));
+            Ok(SocketAddrV4::new(ip, PORTS[(value >> 20) as usize & 3]))
         }
         _ => Err(format!("the code {typed} needs the vendor's cloud service: give the panel's address with --host")),
     }

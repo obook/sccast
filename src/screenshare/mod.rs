@@ -11,6 +11,7 @@ mod approval;
 mod commands;
 mod media;
 pub mod pin;
+mod pointer;
 mod touch;
 pub mod trace;
 mod wire;
@@ -27,7 +28,7 @@ use crate::capture::{request_key_frame, Capture, ScreenCast};
 use crate::menu::{Settings, Status};
 use crate::session::Out;
 use approval::{Refused, APPROVAL_TIMEOUT};
-use commands::{Commands, CAST_STOPPED, DISCONNECTED};
+use commands::{connect_request, Commands, CAST_STOPPED, DISCONNECTED};
 use media::send_frames;
 
 /// (commandType, commandId) pairs, from the sender's ProtocolConstant (more in commands.rs).
@@ -53,11 +54,12 @@ pub fn find(host: SocketAddr) -> anyhow::Result<SocketAddr> {
 /// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again; after a
 /// refusal, stop.
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
+    let panel = Panel { host, name, settings: s, screen, stop, out };
     trace::line(&format!("sccast {} casting to {name} at {host}, {:?}", env!("CARGO_PKG_VERSION"), s.stream.resolution));
-    let pointer = screen.input().filter(|_| s.touchback).map(|input| format!("pointer granted on a {:?} screen", input.size));
+    let pointer = panel.input().map(|input| format!("pointer granted on a {:?} screen", input.size));
     trace::line(&format!("touchback: {}", pointer.unwrap_or_else(|| "off (setting off, or pointer not granted)".into())));
     // A first failure is a wrong address or a refusal: report it.
-    let mut why = attempt(host, name, s, screen, stop, out)?;
+    let mut why = panel.attempt()?;
     // Up to 3 times in 5 min from the terminal, without limit from the menu, as mirror.
     let mut drops = crate::device::Drops::new(matches!(out, Out::Menu(_)));
     while let Some(lost) = why {
@@ -70,7 +72,7 @@ pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, sto
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        why = match attempt(host, name, s, screen, stop, out) {
+        why = match panel.attempt() {
             Err(e) if e.is::<Refused>() => return Err(e),
             other => other.unwrap_or_else(|e| Some(format!("{e:#}"))),
         };
@@ -78,133 +80,153 @@ pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, sto
     Ok(())
 }
 
-/// A session, tried again every 5 s for 35 s while the panel still holds the previous one:
-/// it drops a lost session only after its own 30 s without news (Windows client).
-fn attempt(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<Option<String>> {
-    let started = Instant::now();
-    loop {
-        let result = session(host, name, s, screen, stop, out);
-        // A stop during a session or a retry ends it quietly, without a new connection.
-        if stop.load(Ordering::SeqCst) {
-            return Ok(None);
-        }
-        match result {
-            Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.retry) && started.elapsed() < BUSY_WAIT => {
-                trace::line(&format!("{e:#}: trying again in 5 s"));
-                out.say(&format!("{name} still holds the previous session: trying again in 5 s..."));
-                std::thread::sleep(BUSY_RETRY);
+/// One cast to one panel: what every session needs.
+struct Panel<'a> {
+    host: SocketAddr,
+    name: &'a str,
+    settings: &'a Settings,
+    screen: &'a ScreenCast,
+    stop: &'static AtomicBool,
+    out: &'a Out,
+}
+
+impl Panel<'_> {
+    /// The pointer for touchback. The setting decides: a pointer granted earlier stays
+    /// unused when it is off.
+    fn input(&self) -> Option<Arc<crate::capture::Input>> {
+        self.screen.input().filter(|_| self.settings.touchback)
+    }
+
+    /// A session, tried again every 5 s for 35 s while the panel still holds the previous one:
+    /// it drops a lost session only after its own 30 s without news (Windows client).
+    fn attempt(&self) -> anyhow::Result<Option<String>> {
+        let started = Instant::now();
+        loop {
+            let result = self.session();
+            // A stop during a session or a retry ends it quietly, without a new connection.
+            if self.stop.load(Ordering::SeqCst) {
+                return Ok(None);
             }
-            other => return other.inspect_err(|e| trace::line(&format!("failed: {e:#}"))),
+            let busy = matches!(&result, Err(e) if e.downcast_ref::<Refused>().is_some_and(|refused| refused.retry));
+            if !busy || started.elapsed() >= BUSY_WAIT {
+                return result.inspect_err(|e| trace::line(&format!("failed: {e:#}")));
+            }
+            trace::line("the panel still holds the previous session: trying again in 5 s");
+            self.out.say(&format!("{} still holds the previous session: trying again in 5 s...", self.name));
+            std::thread::sleep(BUSY_RETRY);
         }
     }
-}
 
-/// One session: Ok(None) at `stop` or when the panel ends the cast, Ok(Some(why)) when it is lost.
-fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<Option<String>> {
-    let mut commands = Commands::open(host, stop)?;
-    let local_ip = commands.socket.local_addr()?.ip();
-    commands.send(CONNECT, &connect_request(s.pin.as_deref(), local_ip))?;
-    tracing::info!(%host, "waiting for approval on the panel");
-    // The menu counts down; the terminal says it once per wait.
-    let countdown = |left: u64| {
-        if matches!(out, Out::Menu(_)) || left == APPROVAL_TIMEOUT.as_secs() {
-            out.say(&format!("Click Allow on the panel {name} ({left} s)..."));
-        }
-    };
-    let Some((_, answer)) = commands.wait(CONNECTED, stop, &countdown)? else { return Ok(None) };
-    approval::check("connection", &answer)?;
-    let (width, height) = s.stream.resolution;
-    let audio = json!({"codec": 11, "sampleRate": 44100, "channel": 2, "bitDepth": 16, "samplePerPacket": 1024, "adtsEnabled": true});
-    let request = json!({"authorizeMode": 0, "castMode": 0, "displayMode": 0, "supportAudio": !s.stream.no_audio,
-        "audio": audio, "video": {"width": width, "height": height}});
-    commands.send(CAST, &request)?;
-    let Some((version, answer)) = commands.wait(CAST_ANSWER, stop, &countdown)? else { return Ok(None) };
-    tracing::info!(version, %answer, "cast answer");
-    approval::check("cast", &answer)?;
-    out.say(&format!("Casting to {name}"));
-    let port = |key: &str| answer[key].as_u64().and_then(|p| u16::try_from(p).ok()).with_context(|| format!("no {key} in {answer}"));
-    let video_socket = media::connect(host, port("videoPort")?)?;
-    let audio_socket = if s.stream.no_audio { None } else { Some(media::connect(host, port("audioPort")?)?) };
-
-    // A new capture starts with a key frame, after a reconnection too.
-    let capture = Capture::start(Some(screen), &s.stream, s.audio_delay)?;
-    let encoder = capture.element("venc").context("no encoder in the pipeline")?;
-    // ponytail: leaks one flag per session (a byte), as mirror does: the threads want a 'static flag.
-    let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
-    let index = (version >= INDEX_VERSION).then_some(0);
-    // Live panel of the menu: bytes sent (bitrate), frames dropped, audio delay during the cast.
-    let link = media::Link::default();
-    let sent = Arc::clone(&link.sent);
-    out.send(Status::Served(Box::new(move || sent.load(Ordering::Relaxed))));
-    out.send(Status::Dropped(Arc::clone(&capture.dropped)));
-    out.send(Status::NetworkDropped(Arc::clone(&link.dropped)));
-    if let Some(pad) = capture.audio_pad() {
-        out.send(Status::AudioPad(pad));
-    }
-    let bitrate = s.stream.bitrate;
-    let mut senders = vec![send_frames(&capture, "sink", video_socket, index, bitrate, &link, ended)?];
-    if let Some(socket) = audio_socket {
-        senders.push(send_frames(&capture, "asink", socket, None, bitrate, &link, ended)?);
-    }
-
-    // The setting decides: a pointer granted earlier stays unused when it is off.
-    let input = screen.input().filter(|_| s.touchback);
-    let mut touchback = touch::Touchback::new(input, host.ip(), s.stream.resolution);
-    let mut last_heard = Instant::now();
-    let lost = loop {
-        if stop.load(Ordering::SeqCst) {
-            let _ = commands.send(STOP_CAST, &json!({}));
-            break None;
-        }
-        if ended.load(Ordering::SeqCst) {
-            break Some(link.lost().unwrap_or_else(|| "a media connection closed".into()));
-        }
-        if last_heard.elapsed() > SILENCE {
-            break Some(format!("commands: nothing read for {} s", SILENCE.as_secs()));
-        }
-        if let Err(e) = commands.keep_alive() {
-            break Some(format!("commands: {}", media::cause(&e)));
-        }
-        let m = match commands.incoming.recv_timeout(Duration::from_millis(200)) {
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => break Some("commands: reader stopped".into()),
-            Ok(Err(e)) => break Some(format!("commands: {}", media::cause(&e))),
-            Ok(Ok(m)) => m,
+    /// One session: Ok(None) at `stop` or when the panel ends the cast, Ok(Some(why)) when it
+    /// is lost.
+    fn session(&self) -> anyhow::Result<Option<String>> {
+        let mut commands = Commands::open(self.host, self.stop)?;
+        let Some((version, answer)) = self.negotiate(&mut commands)? else {
+            return Ok(None);
         };
-        last_heard = Instant::now();
-        match (m.command_type, m.command_id) {
-            KEY_FRAME => request_key_frame(&encoder),
-            CAST_STOPPED | DISCONNECTED => break None,
-            _ => match touchback.handle(&m) {
-                Some((ids, payload)) => drop(commands.reply(ids, m.sequence, &payload)),
-                None => tracing::debug!(t = m.command_type, id = m.command_id, payload = %m.payload, "panel message"),
-            },
-        }
-    };
-    ended.store(true, Ordering::SeqCst);
-    drop(commands);
-    for sender in senders {
-        let _ = sender.join();
+        self.stream(commands, version, &answer)
     }
-    Ok(lost)
-}
 
-/// Connect request, with the fields the Windows client fills (keys from its builder; both
-/// spellings of the code appear there). Which ones the panel needs is unverified. Hypothesis:
-/// deviceType 5, written by the Windows client, stands for a PC (the Android sender writes 1).
-/// The device id stays the same across reconnections and runs: derived from the machine-id,
-/// which must not leave the PC as is (systemd says so), so hashed with sccast's name.
-fn connect_request(pin: Option<&str>, local_ip: std::net::IpAddr) -> Value {
-    let read = |path| std::fs::read_to_string(path).map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty());
-    let name = read("/etc/hostname").unwrap_or_else(|| "sccast".to_string());
-    let uuid = format!("{:016x}", fnv1a(&format!("sccast {}", read("/etc/machine-id").unwrap_or_else(|| name.clone()))));
-    let pin = pin.unwrap_or("");
-    json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": 5, "connectType": 0,
-        "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "originIp": local_ip.to_string(),
-        "supportMultiTouch": false, "supportPen": false, "functions": [], "systemName": "Linux"})
-}
+    /// Connect, then ask for the cast, each answer waiting for a person at the panel.
+    /// Returns the panel's version and its answer to the cast request; None at `stop`.
+    fn negotiate(&self, commands: &mut Commands) -> anyhow::Result<Option<(i32, Value)>> {
+        let local_ip = commands.socket.local_addr()?.ip();
+        commands.send(CONNECT, &connect_request(self.settings.pin.as_deref(), local_ip))?;
+        tracing::info!(host = %self.host, "waiting for approval on the panel");
+        // The menu counts down; the terminal says it once per wait.
+        let countdown = |left: u64| {
+            if matches!(self.out, Out::Menu(_)) || left == APPROVAL_TIMEOUT.as_secs() {
+                self.out.say(&format!("Click Allow on the panel {} ({left} s)...", self.name));
+            }
+        };
+        let Some((_, answer)) = commands.wait(CONNECTED, self.stop, &countdown)? else {
+            return Ok(None);
+        };
+        approval::check("connection", &answer)?;
+        let stream = &self.settings.stream;
+        let (width, height) = stream.resolution;
+        let audio = json!({"codec": 11, "sampleRate": 44100, "channel": 2, "bitDepth": 16, "samplePerPacket": 1024, "adtsEnabled": true});
+        let request = json!({"authorizeMode": 0, "castMode": 0, "displayMode": 0, "supportAudio": !stream.no_audio,
+            "audio": audio, "video": {"width": width, "height": height}});
+        commands.send(CAST, &request)?;
+        let Some((version, answer)) = commands.wait(CAST_ANSWER, self.stop, &countdown)? else {
+            return Ok(None);
+        };
+        tracing::info!(version, %answer, "cast answer");
+        approval::check("cast", &answer)?;
+        self.out.say(&format!("Casting to {}", self.name));
+        Ok(Some((version, answer)))
+    }
 
-/// FNV-1a, 64 bits: a hash that stays the same across Rust versions, unlike the std one.
-fn fnv1a(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3))
+    /// Send the screen and sound on the ports of `answer` and follow the commands until the
+    /// end of the session.
+    fn stream(&self, mut commands: Commands, version: i32, answer: &Value) -> anyhow::Result<Option<String>> {
+        let s = self.settings;
+        let port = |key: &str| answer[key].as_u64().and_then(|p| u16::try_from(p).ok()).with_context(|| format!("no {key} in {answer}"));
+        let video_socket = media::connect(self.host, port("videoPort")?)?;
+        let audio_socket = if s.stream.no_audio { None } else { Some(media::connect(self.host, port("audioPort")?)?) };
+
+        // A new capture starts with a key frame, after a reconnection too.
+        let capture = Capture::start(Some(self.screen), &s.stream, s.audio_delay)?;
+        let encoder = capture.element("venc").context("no encoder in the pipeline")?;
+        // ponytail: leaks one flag per session (a byte), as mirror does: the threads want a 'static flag.
+        let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        let link = media::Link::default();
+        self.show_stats(&capture, &link);
+        let index = (version >= INDEX_VERSION).then_some(0);
+        let mut senders = vec![send_frames(&capture, "sink", video_socket, index, s.stream.bitrate, &link, ended)?];
+        if let Some(socket) = audio_socket {
+            senders.push(send_frames(&capture, "asink", socket, None, s.stream.bitrate, &link, ended)?);
+        }
+
+        let mut touchback = touch::Touchback::new(self.input(), self.host.ip(), s.stream.resolution);
+        let mut last_heard = Instant::now();
+        let lost = loop {
+            if self.stop.load(Ordering::SeqCst) {
+                let _ = commands.send(STOP_CAST, &json!({}));
+                break None;
+            }
+            if ended.load(Ordering::SeqCst) {
+                break Some(link.lost().unwrap_or_else(|| "a media connection closed".into()));
+            }
+            if last_heard.elapsed() > SILENCE {
+                break Some(format!("commands: nothing read for {} s", SILENCE.as_secs()));
+            }
+            if let Err(e) = commands.keep_alive() {
+                break Some(format!("commands: {}", media::cause(&e)));
+            }
+            let message = match commands.incoming.recv_timeout(Duration::from_millis(200)) {
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break Some("commands: reader stopped".into()),
+                Ok(Err(e)) => break Some(format!("commands: {}", media::cause(&e))),
+                Ok(Ok(message)) => message,
+            };
+            last_heard = Instant::now();
+            match (message.command_type, message.command_id) {
+                KEY_FRAME => request_key_frame(&encoder),
+                CAST_STOPPED | DISCONNECTED => break None,
+                _ => match touchback.handle(&message) {
+                    Some((ids, payload)) => drop(commands.reply(ids, message.sequence, &payload)),
+                    None => tracing::debug!(?message, "panel message"),
+                },
+            }
+        };
+        ended.store(true, Ordering::SeqCst);
+        drop(commands);
+        for sender in senders {
+            let _ = sender.join();
+        }
+        Ok(lost)
+    }
+
+    /// Live panel of the menu: bytes sent (bitrate), frames dropped, audio delay during the cast.
+    fn show_stats(&self, capture: &Capture, link: &media::Link) {
+        let sent = Arc::clone(&link.sent);
+        self.out.send(Status::Served(Box::new(move || sent.load(Ordering::Relaxed))));
+        self.out.send(Status::Dropped(Arc::clone(&capture.dropped)));
+        self.out.send(Status::NetworkDropped(Arc::clone(&link.dropped)));
+        if let Some(pad) = capture.audio_pad() {
+            self.out.send(Status::AudioPad(pad));
+        }
+    }
 }
