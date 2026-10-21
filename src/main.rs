@@ -92,6 +92,9 @@ fn main() -> anyhow::Result<()> {
             }
             // Find the device before the portal dialog, so a typo fails fast.
             let device = pick_device(device.as_deref())?;
+            if settings.stream.format == cli::Format::Screenshare && device.kind == device::discovery::Kind::Chromecast {
+                bail!("{} is a Chromecast: the screenshare format is for interactive panels", device.name);
+            }
             let stop = stop_flag()?;
             let out = Out::Term;
             let say = |r: device::Report| out.report(r);

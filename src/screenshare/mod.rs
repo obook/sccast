@@ -15,7 +15,7 @@ mod touch;
 pub mod trace;
 mod wire;
 
-use std::net::{Shutdown, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -27,23 +27,18 @@ use crate::capture::{request_key_frame, Capture, ScreenCast};
 use crate::menu::{Settings, Status};
 use crate::session::Out;
 use approval::{Refused, APPROVAL_TIMEOUT};
-use commands::{now_ms, Commands, ANSWER_TIMEOUT};
+use commands::{Commands, ANSWER_TIMEOUT, CAST_STOPPED, DISCONNECTED};
 use media::send_frames;
 
-/// (commandType, commandId) pairs, from the sender's ProtocolConstant.
-const HEARTBEAT: (i32, i32) = (0, 0);
+/// (commandType, commandId) pairs, from the sender's ProtocolConstant (more in commands.rs).
 const CONNECT: (i32, i32) = (1, 1);
 const CONNECTED: (i32, i32) = (1, 101);
-const DISCONNECTED: (i32, i32) = (1, 102);
 const CAST: (i32, i32) = (6, 2);
 const STOP_CAST: (i32, i32) = (6, 3);
 const CAST_ANSWER: (i32, i32) = (6, 102);
-const CAST_STOPPED: (i32, i32) = (6, 103);
 const KEY_FRAME: (i32, i32) = (6, 113);
 /// Receiver version from which video frames carry an index.
 const INDEX_VERSION: i32 = 63;
-/// The Android sender sends a heartbeat after 3 s without writing.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
 /// The Android sender gives up after three read timeouts of 10 s, the Windows client after 30 s.
 const SILENCE: Duration = Duration::from_secs(30);
 /// While the panel still holds the lost session: a try every 5 s, for a bit more than its 30 s.
@@ -52,14 +47,14 @@ const BUSY_WAIT: Duration = Duration::from_secs(35);
 
 /// Check that the panel answers; return the address that did (one of the code table's ports).
 pub fn find(host: SocketAddr) -> anyhow::Result<SocketAddr> {
-    commands::reach(host).map(|(_, address)| address)
+    commands::reach(host, &AtomicBool::new(false)).map(|(_, address)| address)
 }
 
 /// Cast `screen` to the panel at `host` until `stop`. After a loss, connect again; after a
 /// refusal, stop.
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     trace::line(&format!("sccast {} casting to {name} at {host}, {:?}", env!("CARGO_PKG_VERSION"), s.stream.resolution));
-    let pointer = screen.input().map(|input| format!("pointer granted on a {:?} screen", input.size));
+    let pointer = screen.input().filter(|_| s.touchback).map(|input| format!("pointer granted on a {:?} screen", input.size));
     trace::line(&format!("touchback: {}", pointer.unwrap_or_else(|| "off (setting off, or pointer not granted)".into())));
     // A first failure is a wrong address or a refusal: report it.
     let mut why = attempt(host, name, s, screen, stop, out)?;
@@ -88,8 +83,13 @@ pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, sto
 fn attempt(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<Option<String>> {
     let started = Instant::now();
     loop {
-        match session(host, name, s, screen, stop, out) {
-            Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.retry) && started.elapsed() < BUSY_WAIT && !stop.load(Ordering::SeqCst) => {
+        let result = session(host, name, s, screen, stop, out);
+        // A stop during a session or a retry ends it quietly, without a new connection.
+        if stop.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        match result {
+            Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.retry) && started.elapsed() < BUSY_WAIT => {
                 trace::line(&format!("{e:#}: trying again in 5 s"));
                 out.say(&format!("{name} still holds the previous session: trying again in 5 s..."));
                 std::thread::sleep(BUSY_RETRY);
@@ -101,7 +101,7 @@ fn attempt(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
 
 /// One session: Ok(None) at `stop` or when the panel ends the cast, Ok(Some(why)) when it is lost.
 fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<Option<String>> {
-    let mut commands = Commands::open(host)?;
+    let mut commands = Commands::open(host, stop)?;
     let local_ip = commands.socket.local_addr()?.ip();
     commands.send(CONNECT, &connect_request(s.pin.as_deref(), local_ip))?;
     tracing::info!(%host, "waiting for approval on the panel");
@@ -147,8 +147,9 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
         senders.push(send_frames(&capture, "asink", socket, None, bitrate, &link, ended)?);
     }
 
-    let mut touchback = touch::Touchback::new(screen.input(), s.stream.resolution);
-    let mut last_heartbeat = Instant::now();
+    // The setting decides: a pointer granted earlier stays unused when it is off.
+    let input = screen.input().filter(|_| s.touchback);
+    let mut touchback = touch::Touchback::new(input, host.ip(), s.stream.resolution);
     let mut last_heard = Instant::now();
     let lost = loop {
         if stop.load(Ordering::SeqCst) {
@@ -161,11 +162,8 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
         if last_heard.elapsed() > SILENCE {
             break Some(format!("commands: nothing read for {} s", SILENCE.as_secs()));
         }
-        if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
-            if let Err(e) = commands.send(HEARTBEAT, &json!({"sentTimeMs": now_ms()})) {
-                break Some(format!("commands: {}", media::cause(&e)));
-            }
-            last_heartbeat = Instant::now();
+        if let Err(e) = commands.keep_alive() {
+            break Some(format!("commands: {}", media::cause(&e)));
         }
         let m = match commands.incoming.recv_timeout(Duration::from_millis(200)) {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -184,7 +182,7 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
         }
     };
     ended.store(true, Ordering::SeqCst);
-    let _ = commands.socket.shutdown(Shutdown::Both);
+    drop(commands);
     for sender in senders {
         let _ = sender.join();
     }
@@ -194,13 +192,19 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
 /// Connect request, with the fields the Windows client fills (keys from its builder; both
 /// spellings of the code appear there). Which ones the panel needs is unverified. Hypothesis:
 /// deviceType 5, written by the Windows client, stands for a PC (the Android sender writes 1).
-/// The device id stays the same across reconnections (machine-id).
+/// The device id stays the same across reconnections and runs: derived from the machine-id,
+/// which must not leave the PC as is (systemd says so), so hashed with sccast's name.
 fn connect_request(pin: Option<&str>, local_ip: std::net::IpAddr) -> Value {
     let read = |path| std::fs::read_to_string(path).map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty());
     let name = read("/etc/hostname").unwrap_or_else(|| "sccast".to_string());
-    let uuid = read("/etc/machine-id").unwrap_or_else(|| name.clone());
+    let uuid = format!("{:016x}", fnv1a(&format!("sccast {}", read("/etc/machine-id").unwrap_or_else(|| name.clone()))));
     let pin = pin.unwrap_or("");
     json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": 5, "connectType": 0,
         "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "originIp": local_ip.to_string(),
         "supportMultiTouch": false, "supportPen": false, "functions": [], "systemName": "Linux"})
+}
+
+/// FNV-1a, 64 bits: a hash that stays the same across Rust versions, unlike the std one.
+fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3))
 }

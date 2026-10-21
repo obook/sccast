@@ -55,7 +55,7 @@ pub enum Command {
         #[arg(long, default_value_t = 1.5)]
         latency: f64,
         /// Screenshare format: the panel's address and command port, when --pin cannot give it.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "device")]
         host: Option<std::net::SocketAddr>,
         /// Screenshare format: the 6-character code shown on the panel. It also gives the panel's
         /// address (unverified on a real panel).

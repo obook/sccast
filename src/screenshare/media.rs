@@ -157,6 +157,11 @@ pub fn send_frames(
                 continue;
             };
             let Some(buffer) = sample.buffer() else { continue };
+            // Flush again: the kernel may have taken the rest while this frame was awaited.
+            if let Err(e) = flush(&mut socket, &mut pending) {
+                link.lose(format!("{name}: {}", cause(&e)));
+                break;
+            }
             let key_frame = !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT);
             let admit = gate.admit(!pending.is_empty(), key_frame);
             // Video bitrate: one cut per dropping spell, back up after 10 s without one.

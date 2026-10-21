@@ -8,7 +8,7 @@
 //! Date: October 2026
 //! Licence: MIT
 
-use std::net::UdpSocket;
+use std::net::{IpAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,13 +59,15 @@ pub struct Touchback {
     running: Option<(u16, &'static AtomicBool)>,
     /// The desktop's pointer; None when the Touchback setting is off.
     input: Option<Arc<Input>>,
+    /// Only the panel may move the pointer: datagrams from anywhere else are dropped.
+    panel: IpAddr,
     /// Size of the video the panel shows, in pixels.
     video: (f64, f64),
 }
 
 impl Touchback {
-    pub fn new(input: Option<Arc<Input>>, (width, height): (u32, u32)) -> Self {
-        Self { running: None, input, video: (f64::from(width), f64::from(height)) }
+    pub fn new(input: Option<Arc<Input>>, panel: IpAddr, (width, height): (u32, u32)) -> Self {
+        Self { running: None, input, panel, video: (f64::from(width), f64::from(height)) }
     }
 
     /// Act on a touchback request in `m`; return the answer to send, if any.
@@ -85,7 +87,7 @@ impl Touchback {
                     // ponytail: leaks one flag per start (a byte), the thread wants a 'static flag.
                     let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
                     let video = self.video;
-                    match listen(ended, move |touch| apply(&input, &touch, video)) {
+                    match listen(ended, self.panel, move |touch| apply(&input, &touch, video)) {
                         Ok(port) => self.running = Some((port, ended)),
                         Err(e) => tracing::warn!("touchback socket: {e}"),
                     }
@@ -195,7 +197,7 @@ fn apply(input: &Input, touch: &TouchEvent, video: (f64, f64)) {
 }
 
 /// Open a UDP socket on any port and read touches on it until `ended`, passing each to `on_touch`.
-fn listen(ended: &'static AtomicBool, mut on_touch: impl FnMut(TouchEvent) + Send + 'static) -> std::io::Result<u16> {
+fn listen(ended: &'static AtomicBool, panel: IpAddr, mut on_touch: impl FnMut(TouchEvent) + Send + 'static) -> std::io::Result<u16> {
     let socket = UdpSocket::bind(("0.0.0.0", 0))?;
     socket.set_read_timeout(Some(Duration::from_millis(200)))?;
     let port = socket.local_addr()?.port();
@@ -203,6 +205,11 @@ fn listen(ended: &'static AtomicBool, mut on_touch: impl FnMut(TouchEvent) + Sen
         let mut buffer = [0; 2048];
         while !ended.load(Ordering::SeqCst) {
             let Ok((len, from)) = socket.recv_from(&mut buffer) else { continue };
+            // A student's device on the same Wi-Fi must not drive the teacher's pointer.
+            if from.ip() != panel {
+                tracing::warn!(%from, "touchback datagram from another address, dropped");
+                continue;
+            }
             match decode(&buffer[..len]) {
                 Some(touch) => on_touch(touch),
                 None => tracing::debug!(%from, len, "touchback datagram not understood"),

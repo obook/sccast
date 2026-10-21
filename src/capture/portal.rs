@@ -45,6 +45,16 @@ pub struct Input {
     runtime: Arc<Runtime>,
 }
 
+/// A RemoteDesktop session, or None (logged) when the desktop has no such portal.
+async fn remote_session() -> Option<(RemoteDesktop, Session<RemoteDesktop>)> {
+    let opened = async {
+        let remote = RemoteDesktop::new().await?;
+        let session = remote.create_session(Default::default()).await?;
+        ashpd::Result::Ok((remote, session))
+    };
+    opened.await.inspect_err(|e| tracing::warn!("no RemoteDesktop portal, touchback off: {e}")).ok()
+}
+
 fn sources() -> SelectSourcesOptions {
     SelectSourcesOptions::default()
         .set_cursor_mode(CursorMode::Embedded)
@@ -60,7 +70,9 @@ impl ScreenCast {
         let (node_id, fd, session, input) = runtime
             .block_on(async {
                 let screencast = Screencast::new().await?;
-                if !touchback {
+                // A desktop without the RemoteDesktop portal still shares the screen.
+                let remote = if touchback { remote_session().await } else { None };
+                let Some((remote, session)) = remote else {
                     let session = screencast.create_session(Default::default()).await?;
                     screencast.select_sources(&session, sources()).await?.response()?;
                     let streams = screencast.start(&session, None, Default::default()).await?.response()?;
@@ -68,21 +80,21 @@ impl ScreenCast {
                     tracing::info!(node = stream.pipe_wire_node_id(), size = ?stream.size(), "screen selected");
                     let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await?;
                     return anyhow::Ok((stream.pipe_wire_node_id(), fd, Some(session), None));
-                }
-                let remote = RemoteDesktop::new().await?;
-                let session = remote.create_session(Default::default()).await?;
+                };
                 let devices = SelectDevicesOptions::default().set_devices(ashpd::enumflags2::BitFlags::from(DeviceType::Pointer));
                 remote.select_devices(&session, devices).await?.response()?;
                 screencast.select_sources(&session, sources()).await?.response()?;
                 let started = remote.start(&session, None, Default::default()).await?.response()?;
                 let stream = started.streams().first().context("portal returned no stream")?;
-                let (width, height) = stream.size().context("portal gave no screen size")?;
-                // The dialog may grant the screen and not the pointer: check what it gave.
-                let pointer = started.devices().contains(DeviceType::Pointer);
-                tracing::info!(node = stream.pipe_wire_node_id(), width, height, devices = ?started.devices(), pointer, "screen selected for touchback");
+                // The dialog may grant the screen and not the pointer: check what it gave. Without
+                // the screen size, touches cannot be placed either.
+                let size = stream.size();
+                let pointer = started.devices().contains(DeviceType::Pointer) && size.is_some();
+                tracing::info!(node = stream.pipe_wire_node_id(), ?size, devices = ?started.devices(), pointer, "screen selected for touchback");
                 if !pointer {
                     tracing::warn!("the desktop did not grant the pointer: touchback stays off");
                 }
+                let (width, height) = size.unwrap_or((1, 1));
                 let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await?;
                 let node = stream.pipe_wire_node_id();
                 // The session is kept even without the pointer: the capture lives on it.
