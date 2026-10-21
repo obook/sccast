@@ -59,6 +59,8 @@ pub fn find(host: SocketAddr) -> anyhow::Result<SocketAddr> {
 /// refusal, stop.
 pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     trace::line(&format!("sccast {} casting to {name} at {host}, {:?}", env!("CARGO_PKG_VERSION"), s.stream.resolution));
+    let pointer = screen.input().map(|input| format!("pointer granted on a {:?} screen", input.size));
+    trace::line(&format!("touchback: {}", pointer.unwrap_or_else(|| "off (setting off, or pointer not granted)".into())));
     // A first failure is a wrong address or a refusal: report it.
     let mut why = attempt(host, name, s, screen, stop, out)?;
     // Up to 3 times in 5 min from the terminal, without limit from the menu, as mirror.
@@ -145,7 +147,7 @@ fn session(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, stop
         senders.push(send_frames(&capture, "asink", socket, None, bitrate, &link, ended)?);
     }
 
-    let mut touchback = touch::Touchback::new(screen.input.clone(), s.stream.resolution);
+    let mut touchback = touch::Touchback::new(screen.input(), s.stream.resolution);
     let mut last_heartbeat = Instant::now();
     let mut last_heard = Instant::now();
     let lost = loop {

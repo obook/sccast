@@ -158,8 +158,13 @@ fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>, touchbac
         out.say("Choose the screen in the dialog...");
         match ScreenCast::open(touchback) {
             Ok(opened) => {
+                let said = match (touchback, opened.input().is_some()) {
+                    (false, _) => "Screen changed: Enter casts it.",
+                    (true, true) => "Screen and pointer granted: touchback on. Enter casts it.",
+                    (true, false) => "Screen changed, but the pointer was not granted: touchback off.",
+                };
                 *slot.lock().unwrap() = Arc::new(opened);
-                out.say("Screen changed: Enter casts it.");
+                out.say(said);
             }
             // Not an Error status: that would end the stats of the running cast.
             Err(e) => out.say(&format!("Screen not changed: {e:#}")),

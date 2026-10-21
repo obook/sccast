@@ -26,8 +26,8 @@ const BUTTONS: [i32; 2] = [0x110, 0x111];
 pub struct ScreenCast {
     pub node_id: u32,
     fd: OwnedFd,
-    /// Pointer control on the shared screen, when touchback was asked.
-    pub input: Option<Arc<Input>>,
+    /// RemoteDesktop session, when touchback was asked (the capture lives on it too).
+    remote: Option<Arc<Input>>,
     _session: Option<Session<Screencast>>,
     // Drives the D-Bus connection that holds the session.
     _runtime: Arc<Runtime>,
@@ -40,6 +40,8 @@ pub struct Input {
     stream: u32,
     /// Size of the shared screen, in the desktop's logical pixels.
     pub size: (f64, f64),
+    /// The desktop granted the pointer, not only the screen.
+    granted: bool,
     runtime: Arc<Runtime>,
 }
 
@@ -75,14 +77,27 @@ impl ScreenCast {
                 let started = remote.start(&session, None, Default::default()).await?.response()?;
                 let stream = started.streams().first().context("portal returned no stream")?;
                 let (width, height) = stream.size().context("portal gave no screen size")?;
-                tracing::info!(node = stream.pipe_wire_node_id(), width, height, devices = ?started.devices(), "screen and pointer selected");
+                // The dialog may grant the screen and not the pointer: check what it gave.
+                let pointer = started.devices().contains(DeviceType::Pointer);
+                tracing::info!(node = stream.pipe_wire_node_id(), width, height, devices = ?started.devices(), pointer, "screen selected for touchback");
+                if !pointer {
+                    tracing::warn!("the desktop did not grant the pointer: touchback stays off");
+                }
                 let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await?;
                 let node = stream.pipe_wire_node_id();
-                anyhow::Ok((node, fd, None, Some((remote, session, node, (f64::from(width), f64::from(height))))))
+                // The session is kept even without the pointer: the capture lives on it.
+                anyhow::Ok((node, fd, None, Some((remote, session, node, (f64::from(width), f64::from(height)), pointer))))
             })
             .context("ScreenCast portal failed (dialog cancelled?)")?;
-        let input = input.map(|(proxy, session, stream, size)| Arc::new(Input { proxy, session, stream, size, runtime: Arc::clone(&runtime) }));
-        Ok(Self { node_id, fd, input, _session: session, _runtime: runtime })
+        let remote = input.map(|(proxy, session, stream, size, granted)| {
+            Arc::new(Input { proxy, session, stream, size, granted, runtime: Arc::clone(&runtime) })
+        });
+        Ok(Self { node_id, fd, remote, _session: session, _runtime: runtime })
+    }
+
+    /// Pointer control on the shared screen, when touchback was asked and the desktop granted it.
+    pub fn input(&self) -> Option<Arc<Input>> {
+        self.remote.clone().filter(|input| input.granted)
     }
 
     pub fn fd(&self) -> i32 {
