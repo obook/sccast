@@ -43,8 +43,8 @@ pub struct Capture {
 
 impl Capture {
     /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
-    /// `audio_delay` shifts the sound later to line it up with the image.
-    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay_ms: i64) -> anyhow::Result<Self> {
+    /// `audio_delay_ms` shifts the sound later to line it up with the image.
+    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay_ms: u64) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
@@ -68,10 +68,6 @@ impl Capture {
                 None
             });
         }
-        if let Some(asrc) = bin.by_name("asrc") {
-            let pad = asrc.static_pad("src").context("audio source has no src pad")?;
-            pad.set_offset(audio_delay_ms * 1_000_000);
-        }
         if stream.format == Format::Hls {
             let sink = bin.by_name("sink").context("hlssink2 not found in pipeline")?;
             sink.set_property("location", path_str(&dir.path().join("seg%05d.ts"))?);
@@ -85,7 +81,11 @@ impl Capture {
             None => None,
         };
         tracing::info!(dir = %dir.path().display(), ?tcp_port, "capture started");
-        Ok(Self { pipeline, dir, tcp_port, dropped })
+        let capture = Self { pipeline, dir, tcp_port, dropped };
+        if let Some(pad) = capture.audio_pad() {
+            set_audio_delay(&pad, audio_delay_ms);
+        }
+        Ok(capture)
     }
 
     /// Bytes sent so far by the Matroska server (mkv format only), to measure the bitrate.
@@ -160,6 +160,11 @@ impl Drop for Capture {
     fn drop(&mut self) {
         let _ = self.pipeline.set_state(gst::State::Null);
     }
+}
+
+/// Delay the sound by `ms`, on a running pipeline too (the menu changes it during a cast).
+pub fn set_audio_delay(pad: &gst::Pad, ms: u64) {
+    pad.set_offset(i64::try_from(ms).unwrap_or(0).saturating_mul(1_000_000));
 }
 
 /// Replace the timestamps of `src` buffers with the pipeline running time at arrival.

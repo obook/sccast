@@ -13,8 +13,7 @@ use crate::device::{DEFAULT_MEDIA_RECEIVER, SCCAST_RECEIVER};
 #[derive(Clone)]
 pub struct Settings {
     pub stream: Stream,
-    /// Milliseconds; negative brings the sound forward.
-    pub audio_delay: i64,
+    pub audio_delay: u64,
     pub latency: Option<f64>,
     pub receiver: String,
 }
@@ -31,10 +30,7 @@ const FPS: [u32; 4] = [25, 30, 50, 60];
 /// None: the receiver page's default (1 s).
 const LATENCIES: [Option<f64>; 5] = [None, Some(1.5), Some(2.0), Some(3.0), Some(5.0)];
 /// 50 ms steps near 0, to tune lip sync by ear during a cast.
-const AUDIO_DELAYS: [i64; 23] = [
-    -1500, -1000, -750, -500, -400, -300, -250, -200, -150, -100, -50, 0, 50, 100, 150, 200, 250, 300, 400, 500,
-    750, 1000, 1500,
-];
+const AUDIO_DELAYS: [u64; 12] = [0, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500];
 /// Row of the audio delay, applied at once to a running cast.
 pub(super) const AUDIO_DELAY_ROW: usize = 6;
 

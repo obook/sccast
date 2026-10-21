@@ -84,9 +84,12 @@ only reads files.
 - The OFFER goes to the broadcast address `*` (rust_cast has no other way):
   checked on the Sharp and one Nest Hub only.
 - Lip sync: sound about 250 ms late on the Sharp, by eye (2026-10-21). Both
-  streams leave the PC fresh (audio 20 ms old, video 30 to 65 ms). A
-  negative audio delay only helps within the playout delay (100 ms): the TV
-  cannot play a sound before it arrives. The source was the Freebox stream
+  streams leave the PC fresh (audio 20 ms old, video 30 to 65 ms). Less late
+  in HLS: the Sharp's mirroring player may not make up for its sound output
+  (hypothesis; openscreen leaves lip sync to the player). Bringing the sound
+  forward only works within the playout delay (100 ms), as the TV cannot
+  play it before it arrives: delaying the image would cost latency. The
+  source was the Freebox stream
   in VLC, whose sound is already slightly late on the PC: part of the
   250 ms comes from it. To measure on a page that flashes and beeps at once,
   filmed in slow motion.

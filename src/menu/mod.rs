@@ -165,8 +165,7 @@ impl Menu {
         change(s, row, dir);
         if row == AUDIO_DELAY_ROW {
             if let Some(pad) = &self.audio_pad {
-                use gstreamer::prelude::PadExt;
-                pad.set_offset(s.audio_delay * 1_000_000);
+                crate::capture::set_audio_delay(pad, s.audio_delay);
                 tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
             }
         }
