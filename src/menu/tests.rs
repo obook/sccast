@@ -111,7 +111,8 @@ fn draws_and_applies_presets() {
     menu.device.select(Some(1));
     menu.set_casting(Some("tv".into()));
     menu.set_status(Status::Player("Playing".into()));
-    menu.set_status(Status::Info("Casting to Living Room TV. Ctrl+C stops.".into()));
+    menu.set_status(Status::Info("Mirroring to Living Room TV. Ctrl+C stops.".into()));
+    s.stream.format = Format::Mirror;
     menu.live.started = Instant::now().checked_sub(Duration::from_secs(754));
     menu.live.buffering = vec![Instant::now().checked_sub(Duration::from_secs(400)).unwrap()];
     menu.live.cpu = 62.0;
@@ -126,7 +127,7 @@ fn draws_and_applies_presets() {
         println!("{}", line.concat());
     }
     let text = screen.concat();
-    assert!(text.contains("Living Room TV") && text.contains("Entry-level TV") && text.contains("HLS"));
+    assert!(text.contains("Living Room TV") && text.contains("Entry-level TV") && text.contains("Mirror"));
     assert!(text.contains("00:12:34") && text.contains("Bitrate"));
 
     // SCCAST_SCREENSHOT=file.html cargo test draws: the same screen as a colored page, for media/.
