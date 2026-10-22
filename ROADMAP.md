@@ -99,9 +99,12 @@ program or capture the screen. The light way: a button in the
 `sccast cast --device ...` with `QProcess` and stops it with SIGTERM,
 which already frees the TV. Linux only until the Windows port.
 
+Done:
+
+- [x] `sccast list --json`, for another program to offer the device choice
+
 To do:
 
-- [ ] `sccast list --json`, for another program to offer the device choice
 - [ ] Stable status lines on the output (casting, reconnecting, error), for OpenBoard to show
 - [ ] "Cast to the TV" button in the OpenBoard fork
 
@@ -109,7 +112,7 @@ To do:
 
 Done:
 
-- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.1
+- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.2
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
 - [x] Install the v0.3.0 .deb on another KDE neon PC and cast
