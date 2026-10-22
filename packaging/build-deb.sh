@@ -3,7 +3,7 @@
 # Name: build-deb.sh
 # Description: Build the sccast .deb for one target inside an Ubuntu container.
 # Usage: packaging/build-deb.sh neon|ubuntu26.04
-# Output: target/debian/sccast_<version>-1~<target>_amd64.deb
+# Output: target/debian/sccast_<version>-1.<target>_amd64.deb
 # Author: O. Booklage
 # Date: October 2026
 # Licence: MIT
@@ -52,7 +52,8 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \
 EOF
 
 # One target dir per release: binaries built against different libraries must not mix.
+# A dot, not a tilde, in the revision: GitHub renames "~" to "." in release files.
 docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e CARGO_TARGET_DIR="/src/target/$target" \
     -v "$PWD:/src" -w /src "$image" \
-    sh -c "cargo deb --deb-revision '1~$target' -o target/debian/"
+    sh -c "cargo deb --deb-revision '1.$target' -o target/debian/"
