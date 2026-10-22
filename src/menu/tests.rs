@@ -40,13 +40,12 @@ fn alerts_follow_thresholds() {
 }
 
 fn device(id: &str, name: &str, model: &str) -> CastDevice {
-    let kind = crate::device::discovery::Kind::Chromecast;
-    CastDevice { id: id.into(), name: name.into(), model: model.into(), ip: std::net::Ipv4Addr::LOCALHOST, port: 8009, kind }
+    CastDevice { id: id.into(), name: name.into(), model: model.into(), ip: std::net::Ipv4Addr::LOCALHOST, port: 8009 }
 }
 
 fn settings(bitrate: u32) -> Settings {
     let stream = Stream { resolution: (1920, 1080), fps: 30, bitrate, port: 8090, no_audio: false, format: Format::Hls };
-    Settings { stream, audio_delay: 0, latency: 1.5, receiver: SCCAST_RECEIVER.into(), pin: None, touchback: false }
+    Settings { stream, audio_delay: 0, latency: 1.5, receiver: SCCAST_RECEIVER.into() }
 }
 
 #[test]

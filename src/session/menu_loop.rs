@@ -27,7 +27,7 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
         let _ = crate::MENU_LOG.set(file);
     }
     // The screen first, before the menu takes the terminal.
-    let screen = ScreenCast::open(settings.touchback)?;
+    let screen = ScreenCast::open()?;
     let mut terminal = ratatui::init();
     let stderr_to_log = crate::MENU_LOG.get().and_then(|file| super::terminal::StderrToFile::new(file).ok());
     // A panic's message went to the log with stderr: caught here, to say where it is.
@@ -72,7 +72,7 @@ fn drive_menu(
         };
         tracing::info!(?action, "menu action");
         if let menu::Action::PickScreen = action {
-            pick_screen(&menu, &screen, s.touchback);
+            pick_screen(&menu, &screen);
             continue;
         }
         // The receiver stays open on the TV between casts to the same TV, and after s:
@@ -116,8 +116,8 @@ fn drive_menu(
         let settings = s.clone();
         let screen = Arc::clone(&screen.lock().unwrap());
         menu.set_casting(Some(device.id.clone()));
-        // The mirror format closes its own app, and a panel has no app: nothing left open to track.
-        let tracked = settings.stream.format != cli::Format::Mirror && device.kind == device::discovery::Kind::Chromecast;
+        // The mirror format closes its own app: nothing left open to track.
+        let tracked = settings.stream.format != cli::Format::Mirror;
         *tv.lock().unwrap() = tracked.then(|| (device.clone(), settings.receiver.clone()));
         let cast = std::thread::spawn(move || {
             let result = cast_screen(&device, &settings, &screen, stop, Some(keep), &out);
@@ -172,20 +172,14 @@ fn close_on_signal(tv: &Arc<Mutex<Option<(CastDevice, String)>>>, quit: &'static
 }
 
 /// Open the portal dialog in a thread: the menu keeps answering, the cast goes on meanwhile.
-fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>, touchback: bool) {
+fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>) {
     let out = Out::Menu(menu.current_sender());
     let slot = Arc::clone(screen);
     std::thread::spawn(move || {
         out.say("Choose the screen in the dialog...");
-        match ScreenCast::open(touchback) {
+        match ScreenCast::open() {
             Ok(opened) => {
-                // A refused pointer is in the note.
-                let said = if opened.input().is_some() {
-                    "Screen and pointer granted: touchback on. Enter casts it."
-                } else {
-                    "Screen changed: Enter casts it."
-                };
-                let said = opened.note().unwrap_or_else(|| said.to_string());
+                let said = opened.note().unwrap_or_else(|| "Screen changed.".to_string());
                 *slot.lock().unwrap() = Arc::new(opened);
                 out.say(&said);
                 out.send(menu::Status::ScreenPicked);

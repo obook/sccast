@@ -14,7 +14,6 @@ mod device;
 mod hls;
 mod menu;
 mod mirror;
-mod screenshare;
 mod session;
 
 use std::io::{IsTerminal, Write};
@@ -66,25 +65,13 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Cast { device, url, file, audio_delay, receiver, latency, host, pin, touchback, stream } => {
+        Command::Cast { device, url, file, audio_delay, receiver, latency, stream } => {
             if let Some(file) = &file {
                 if !file.is_file() {
                     bail!("{} is not a file", file.display());
                 }
             }
-            let settings = menu::Settings { stream, audio_delay, latency, receiver, pin, touchback };
-            // A panel given by address or by its code, without discovery.
-            if settings.stream.format == cli::Format::Screenshare && device.is_none() {
-                let host = match (host, settings.pin.as_deref()) {
-                    (Some(host), _) => host,
-                    (None, Some(code)) => screenshare::pin::decode(code).map_err(anyhow::Error::msg)?.into(),
-                    (None, None) => bail!("--format screenshare needs --pin CODE, --host IP:PORT or --device NAME"),
-                };
-                // Before the screen dialog: a wrong code fails in seconds, without a click.
-                let host = spin(&format!("Looking for the panel at {}...", host.ip()), || screenshare::find(host))?;
-                let screen = capture::ScreenCast::open(settings.touchback)?;
-                return screenshare::cast(host, &host.to_string(), &settings, &screen, stop_flag()?, &Out::Term);
-            }
+            let settings = menu::Settings { stream, audio_delay, latency, receiver };
             // In a terminal without --device, the menu picks the device and runs the casts.
             let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
             if device.is_none() && url.is_none() && file.is_none() && interactive {
@@ -92,9 +79,6 @@ fn main() -> anyhow::Result<()> {
             }
             // Find the device before the portal dialog, so a typo fails fast.
             let device = pick_device(device.as_deref())?;
-            if settings.stream.format == cli::Format::Screenshare && device.kind == device::discovery::Kind::Chromecast {
-                bail!("{} is a Chromecast: the screenshare format is for interactive panels", device.name);
-            }
             let stop = stop_flag()?;
             let out = Out::Term;
             let say = |r: device::Report| out.report(r);
@@ -110,15 +94,8 @@ fn main() -> anyhow::Result<()> {
                 let receiver = session::launch(&device, &settings.receiver, false, stop, &out)?;
                 return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop, &NO_KEEP, &say);
             }
-            let screen = capture::ScreenCast::open(settings.touchback)?;
+            let screen = capture::ScreenCast::open()?;
             session::cast_screen(&device, &settings, &screen, stop, None, &out)
-        }
-        Command::Pin { code } => {
-            let address = screenshare::pin::decode(&code).map_err(anyhow::Error::msg)?;
-            let index = screenshare::pin::PORTS.iter().position(|p| *p == address.port()).unwrap_or_default();
-            println!("{}\tport {} (index {index} of 0-3)", address.ip(), address.port());
-            println!("protocol trace of the casts: {}", screenshare::trace::path().display());
-            Ok(())
         }
         Command::Stop { device, receiver: app_id } => {
             let device = pick_device(device.as_deref())?;
@@ -129,10 +106,10 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Serve { test_pattern, mut stream } => {
             // Mirror streams to a TV only, over RTP: serve plays the same screen in HLS.
-            if matches!(stream.format, cli::Format::Mirror | cli::Format::Screenshare) {
+            if stream.format == cli::Format::Mirror {
                 stream.format = cli::Format::Hls;
             }
-            let screen = if test_pattern { None } else { Some(capture::ScreenCast::open(false)?) };
+            let screen = if test_pattern { None } else { Some(capture::ScreenCast::open()?) };
             let stop = stop_flag()?;
             let hls = capture::Capture::start(screen.as_ref(), &stream, 0)?;
             let (path, _, _server) = session::serve(&hls, &stream, stop)?;

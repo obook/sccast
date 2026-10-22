@@ -7,7 +7,6 @@
 //! Date: October 2026
 //! Licence: MIT
 
-mod code;
 mod draw;
 mod live;
 mod panel;
@@ -29,7 +28,7 @@ use ratatui::DefaultTerminal;
 use crate::device::{discovery, CastDevice};
 use live::Live;
 pub use settings::Settings;
-use settings::{change, AUDIO_DELAY_ROW, ROWS, TOUCHBACK_ROW};
+use settings::{change, AUDIO_DELAY_ROW, ROWS};
 
 enum Found {
     Device(CastDevice),
@@ -61,8 +60,6 @@ pub enum Status {
     Served(ByteCounter),
     /// Frames dropped by the capture since the start.
     Dropped(Arc<AtomicU64>),
-    /// Frames dropped because the network did not take them in time (screenshare).
-    NetworkDropped(Arc<AtomicU64>),
     /// Time to connect to the TV's Cast port, None if it did not answer.
     RoundTrip(Option<Duration>),
     /// The cast went down to this resolution (the TV refused the one set).
@@ -94,8 +91,6 @@ pub struct Menu {
     chosen_resolution: Option<(u32, u32)>,
     /// Sound source of the running cast, for the live audio delay.
     audio_pad: Option<gstreamer::Pad>,
-    /// Panel whose code is being typed (None: a panel not in the list, `c`), and the code so far.
-    code_entry: Option<(Option<CastDevice>, String)>,
 }
 
 impl Menu {
@@ -125,7 +120,6 @@ impl Menu {
             live: Live::default(),
             chosen_resolution: None,
             audio_pad: None,
-            code_entry: None,
         }
     }
 
@@ -153,7 +147,6 @@ impl Menu {
             Status::Segments(dir) => self.live.segments = Some(dir),
             Status::Served(counter) => self.live.served = Some((counter, None)),
             Status::Dropped(counter) => self.live.dropped = Some(counter),
-            Status::NetworkDropped(counter) => self.live.network_dropped = Some(counter),
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
             // Handled in next(), which holds the settings and returns actions.
             Status::Resolution(_) | Status::ScreenPicked => {}
@@ -173,9 +166,6 @@ impl Menu {
         let row = self.row.selected().unwrap_or(0);
         self.chosen_resolution = None;
         change(s, row, dir);
-        if row == TOUCHBACK_ROW {
-            self.status = Status::Info("Touchback: press p to choose the screen again".into());
-        }
         if row == AUDIO_DELAY_ROW && self.casting.is_some() {
             match &self.audio_pad {
                 Some(pad) => {
@@ -258,7 +248,7 @@ impl Menu {
                     self.device_resolution(s, size);
                     continue;
                 }
-                // A panel reached by its code is not listed: Enter recasts it by hand.
+                // A device gone from the list since (rescan): Enter recasts by hand.
                 if let Status::ScreenPicked = status {
                     if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
                         return Ok(Action::Cast(device.clone()));
@@ -274,7 +264,7 @@ impl Menu {
             self.tick += 1;
             // About once a minute: a frozen menu shows in the log as the end of these lines.
             if self.tick.is_multiple_of(600) {
-                tracing::info!(casting = self.casting.is_some(), code_entry = self.code_entry.is_some(), "menu loop alive");
+                tracing::info!(casting = self.casting.is_some(), "menu loop alive");
             }
             if !event::poll(Duration::from_millis(100))? {
                 continue;
@@ -283,30 +273,7 @@ impl Menu {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            // The panel's code must not end up in a log meant for bug reports.
-            if self.code_entry.is_none() {
-                tracing::info!(key = ?key.code, "key");
-            }
-            let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
-            if let Some((panel, typed)) = self.code_entry.as_mut().filter(|_| !ctrl_c) {
-                match code::key(typed, key.code) {
-                    code::Typed::Editing => self.status = Status::Info(code::prompt(panel.as_ref(), typed)),
-                    code::Typed::Cancelled => {
-                        self.code_entry = None;
-                        self.status = Status::Info("Choose a device, then Enter".into());
-                    }
-                    code::Typed::Done => {
-                        let (panel, typed) = self.code_entry.take().expect("code entry");
-                        s.pin = (!typed.is_empty()).then(|| typed.clone());
-                        // A panel not in the list: its code gives its address.
-                        match panel.map_or_else(|| code::panel(&typed), Ok) {
-                            Ok(panel) => return Ok(Action::Cast(panel)),
-                            Err(e) => self.status = Status::Error(e),
-                        }
-                    }
-                }
-                continue;
-            }
+            tracing::info!(key = ?key.code, "key");
             let count = if self.on_settings { ROWS.len() } else { self.devices.len() };
             let state = if self.on_settings { &mut self.row } else { &mut self.device };
             match key.code {
@@ -315,10 +282,6 @@ impl Menu {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(Action::Quit),
                 KeyCode::Char('s') if self.casting.is_some() => return Ok(Action::Stop),
                 KeyCode::Char('p') => return Ok(Action::PickScreen),
-                KeyCode::Char('c') => {
-                    self.status = Status::Info(code::prompt(None, ""));
-                    self.code_entry = Some((None, String::new()));
-                }
                 KeyCode::Up | KeyCode::Char('k') if count > 0 => {
                     state.select(Some(state.selected().unwrap_or(0).checked_sub(1).unwrap_or(count - 1)));
                 }
@@ -338,13 +301,6 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
-                    if device.kind == discovery::Kind::Screenshare {
-                        // The panel may show a code to type first; the last one is offered again.
-                        let typed = s.pin.clone().unwrap_or_default();
-                        self.status = Status::Info(code::prompt(Some(&device), &typed));
-                        self.code_entry = Some((Some(device), typed));
-                        continue;
-                    }
                     return Ok(Action::Cast(device));
                 }
                 _ => {}

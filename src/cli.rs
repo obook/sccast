@@ -20,12 +20,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Show the address an interactive panel's code gives, without connecting.
-    Pin {
-        /// The 6-character code shown on the panel.
-        code: String,
-    },
-    /// List Chromecast devices and interactive panels on the local network.
+    /// List Chromecast devices on the local network.
     List {
         /// Discovery duration in seconds.
         #[arg(long, default_value_t = 8)]
@@ -54,17 +49,6 @@ pub enum Command {
         /// PC was in use (2026-10-21); 1.5 s did not.
         #[arg(long, default_value_t = 1.5)]
         latency: f64,
-        /// Screenshare format: the panel's address and command port, when --pin cannot give it.
-        #[arg(long, conflicts_with = "device")]
-        host: Option<std::net::SocketAddr>,
-        /// Screenshare format: the 6-character code shown on the panel. It also gives the panel's
-        /// address (unverified on a real panel).
-        #[arg(long)]
-        pin: Option<String>,
-        /// Let a panel's touches drive the pointer: the screen dialog also asks for pointer
-        /// control (unverified on a real panel).
-        #[arg(long)]
-        touchback: bool,
         #[command(flatten)]
         stream: Stream,
     },
@@ -107,7 +91,6 @@ pub struct Stream {
     pub no_audio: bool,
     /// mirror: Cast Streaming, as Chrome's tab casting, about 0.15 s behind the screen; HLS on a
     /// device without it. hls: 1-second segments, 2 to 3 s. mkv: one Matroska stream (experimental).
-    /// screenshare: interactive panels, with --host (see docs/screenshare.md).
     /// The screen only: serve, --url and --file always use HLS.
     #[arg(long, value_enum, default_value_t = Format::Mirror)]
     pub format: Format,
@@ -118,7 +101,6 @@ pub enum Format {
     Hls,
     Mkv,
     Mirror,
-    Screenshare,
 }
 
 fn parse_resolution(s: &str) -> Result<(u32, u32), String> {

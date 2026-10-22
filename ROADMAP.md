@@ -31,32 +31,9 @@ To do:
 - [ ] Lip sync: sound late in mirror on the Sharp (about 250 ms by eye), not in HLS. Measure it, then decide
 - [ ] Authenticate the TV (Cast device auth, as chromiacast does)
 
-## Screenshare (interactive panels)
+## Interactive panels
 
-The "classic" protocol of a classroom panel receiver, read from its Android
-sender. Not tested on a real panel yet. Notes in
-[docs/screenshare.md](docs/screenshare.md).
-
-Done (unverified on a panel):
-
-- [x] Command channel: varint length, protobuf message, JSON payload; connect, cast, heartbeat, stop, key frame request
-- [x] Video (H.264, SPS and PPS apart) and sound (AAC with ADTS) over TCP, `--format screenshare --host IP:PORT [--pin CODE]`
-- [x] Find panels with mDNS (`_sspcast._tcp`) next to the Chromecasts; choosing one casts in this format
-- [x] Reconnect after a loss (3 times in 5 min from the terminal, no limit from the menu), each cause logged; a refusal on the panel ends the cast
-- [x] Bounded delay over TCP: small send buffer, drop frames until a key frame when the network falls behind, lower the bitrate
-- [x] Find a panel by the code it shows (`--pin`, `c` in the menu)
-- [x] Menu: Enter on a panel asks for the code it shows, then counts down while someone allows the cast on the panel (90 s)
-- [x] Menu: bitrate, dropped frames and live audio delay for a panel too
-- [x] Touchback setting (`--touchback`, menu row): the panel's touches move the pointer through the RemoteDesktop portal
-
-To do:
-
-- [ ] Test on a real panel (ask before)
-- [ ] Touchback on a real panel: which coordinates it sends, the wheel's direction, the UDP beat to the panel
-- [ ] SSDP discovery, only if a panel does not answer mDNS
-- [ ] Follow the panel's size and frame rate requests, and its bitrate
-- [ ] Menu: show "Screenshare" as the format when a panel is selected, grey out the rows that do not apply (latency, receiver)
-- [ ] Keep the panel connection between two casts, if a real panel asks for approval again each time
+Moved to [sbcast](https://github.com/obook/sbcast) on 2026-10-22.
 
 ## HLS
 

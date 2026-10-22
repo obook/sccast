@@ -44,8 +44,6 @@ pub(super) struct Live {
     pub(super) cpu: f64,
     sampled: Option<Instant>,
     pub(super) dropped: Option<Arc<AtomicU64>>,
-    /// Frames the network did not take in time, since the start (screenshare).
-    pub(super) network_dropped: Option<Arc<AtomicU64>>,
     /// Dropped frames total, one sample per second, last minute.
     pub(super) dropped_history: VecDeque<u64>,
     /// Average download time of the last segments by the TV.
