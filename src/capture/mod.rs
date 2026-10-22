@@ -53,7 +53,10 @@ impl Capture {
         let description = encode::describe(screen, stream);
         tracing::debug!(%description, "pipeline");
 
-        let pipeline = gst::parse::launch(&description).context("cannot build pipeline (missing GStreamer plugin?)")?;
+        if let Some((element, package)) = missing_plugin() {
+            bail!("GStreamer has no {element}: install {package} (Debian and Ubuntu name)");
+        }
+        let pipeline = gst::parse::launch(&description).context("cannot build the GStreamer pipeline")?;
         let bin = pipeline.downcast_ref::<gst::Bin>().context("pipeline is not a bin")?;
         if let Some(src) = bin.by_name("src") {
             restamp_on_arrival(&src, &pipeline)?;
@@ -203,6 +206,21 @@ fn restamp_on_arrival(src: &gst::Element, pipeline: &gst::Element) -> anyhow::Re
         gst::PadProbeReturn::Ok
     });
     Ok(())
+}
+
+/// First element sccast needs that GStreamer lacks, with its package. The .deb pulls them all
+/// in; a build from source may miss one (x264enc is not in the default plugins).
+fn missing_plugin() -> Option<(&'static str, &'static str)> {
+    const NEEDED: [(&str, &str); 7] = [
+        ("x264enc", "gstreamer1.0-plugins-ugly"),
+        ("pipewiresrc", "gstreamer1.0-pipewire"),
+        ("pulsesrc", "gstreamer1.0-plugins-good"),
+        ("hlssink2", "gstreamer1.0-plugins-bad"),
+        ("avenc_aac", "gstreamer1.0-libav"),
+        ("opusenc", "gstreamer1.0-plugins-base"),
+        ("appsink", "gstreamer1.0-plugins-base"),
+    ];
+    NEEDED.into_iter().find(|(element, _)| gst::ElementFactory::find(element).is_none())
 }
 
 fn path_str(path: &Path) -> anyhow::Result<&str> {
