@@ -7,7 +7,6 @@
 //! Date: October 2026
 //! Licence: MIT
 
-use std::time::Duration;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -28,7 +27,7 @@ impl Menu {
         let bold = |s: String, color: Color| Span::styled(s, Style::new().fg(color).add_modifier(Modifier::BOLD));
 
         let elapsed = live.started.map_or(0, |t| t.elapsed().as_secs());
-        let recent = live.buffering.iter().filter(|t| t.elapsed() < Duration::from_secs(60)).count();
+        let recent = live.buffering_last_minute();
         let dropped = live.dropped_last_minute();
         let tv_color = match live.tv.as_str() {
             "Playing" => Color::Green,

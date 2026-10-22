@@ -46,6 +46,8 @@ fn alerts_follow_thresholds() {
     live.fetch = Some(Duration::from_millis(950));
     assert!(live.alert().unwrap().0.starts_with("Network slow: 1 s of video"));
     assert_eq!(live.alert().unwrap().1, Color::Red);
+    live.buffering = vec![Instant::now(); 3];
+    assert!(live.alert().unwrap().0.starts_with("The TV buffered 3 times"));
     live.dropped_history = VecDeque::from([0, 45]);
     assert!(live.alert().unwrap().0.starts_with("PC too slow"));
     live.round_trip = Some(None);

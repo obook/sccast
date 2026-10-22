@@ -24,6 +24,8 @@ pub(super) const DROPPED_PER_MINUTE: u64 = 30;
 pub(super) const SLOW_FETCH: Duration = Duration::from_millis(500);
 const CONGESTED_FETCH: Duration = Duration::from_millis(900);
 pub(super) const SLOW_ROUND_TRIP: Duration = Duration::from_millis(100);
+/// More buffering periods than this in a minute: the TV does not get the stream in time.
+const BUFFERING_PER_MINUTE: usize = 2;
 
 /// Stats of the current cast, shown in the Live panel.
 #[derive(Default)]
@@ -121,6 +123,10 @@ impl Live {
         }
     }
 
+    pub(super) fn buffering_last_minute(&self) -> usize {
+        self.buffering.iter().filter(|t| t.elapsed() < Duration::from_secs(60)).count()
+    }
+
     /// The worst problem seen, with its color, or None when all is well.
     pub(super) fn alert(&self) -> Option<(String, Color)> {
         let dropped = self.dropped_last_minute();
@@ -129,6 +135,10 @@ impl Live {
         }
         if dropped > DROPPED_PER_MINUTE {
             return Some((format!("PC too slow: {dropped} frames lost in a minute. Lower the resolution or close programs"), Color::Red));
+        }
+        let buffering = self.buffering_last_minute();
+        if buffering > BUFFERING_PER_MINUTE {
+            return Some((format!("The TV buffered {buffering} times in a minute. Lower the bitrate"), Color::Red));
         }
         if let Some(fetch) = self.fetch.filter(|f| *f > SLOW_FETCH) {
             let color = if fetch > CONGESTED_FETCH { Color::Red } else { Color::Yellow };
