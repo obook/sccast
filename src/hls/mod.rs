@@ -1,12 +1,10 @@
 //! hls/
 //! HTTP server the TV fetches the stream from: HLS playlist and segments, the Matroska relay,
-//! or a local file. timing.rs measures how long each segment takes to send.
+//! or a local file.
 //!
 //! Author: O. Booklage
 //! Date: October 2026
 //! Licence: MIT
-
-mod timing;
 
 use std::net::{IpAddr, TcpListener, UdpSocket};
 use std::path::Path;
@@ -14,12 +12,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-pub use timing::{forget_fetches, segment_fetch_time};
-
 use anyhow::Context;
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::header::{HeaderValue, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
+use axum::http::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -44,7 +40,6 @@ pub fn serve_file(file: &Path, port: u16, stop: &'static AtomicBool) -> anyhow::
 
 /// Serve the HLS directory `dir` at the root on `port`.
 pub fn serve_hls(dir: &Path, port: u16, stop: &'static AtomicBool) -> anyhow::Result<JoinHandle<()>> {
-    forget_fetches();
     let app = Router::new()
         .fallback_service(ServeDir::new(dir))
         .layer(middleware::from_fn(hls_headers));
@@ -80,9 +75,6 @@ async fn hls_headers(req: Request, next: Next) -> Response {
         }
         Some("ts") => {
             headers.insert(CONTENT_TYPE, HeaderValue::from_static("video/mp2t"));
-            let (parts, body) = res.into_parts();
-            let length = parts.headers.get(CONTENT_LENGTH).and_then(|v| v.to_str().ok()?.parse().ok());
-            return Response::from_parts(parts, timing::timed(body, length));
         }
         _ => {}
     }

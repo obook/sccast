@@ -2236,7 +2236,6 @@ dependencies = [
  "clap",
  "ctr",
  "ctrlc",
- "futures-core",
  "gstreamer",
  "libc",
  "mdns-sd",

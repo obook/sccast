@@ -15,7 +15,7 @@ use ratatui::widgets::{Paragraph, Sparkline};
 use ratatui::Frame;
 
 use super::draw::{rounded, ACCENT};
-use super::live::{load_average, DROPPED_PER_MINUTE, SLOW_FETCH, SLOW_ROUND_TRIP};
+use super::live::{load_average, DROPPED_PER_MINUTE, SLOW_ROUND_TRIP};
 use super::Menu;
 
 impl Menu {
@@ -61,12 +61,7 @@ impl Menu {
             ]),
             Line::from(vec![
                 label("Network"),
-                // HLS: time for the TV to download one 1-second segment.
-                bold(
-                    live.fetch.map_or("-".into(), |f| format!("segment {:.2} s", f.as_secs_f64())),
-                    warn(live.fetch.is_some_and(|f| f > SLOW_FETCH)),
-                ),
-                Span::styled("   ping ", Style::new().fg(Color::Gray)),
+                Span::styled("ping ", Style::new().fg(Color::Gray)),
                 bold(
                     match live.round_trip {
                         None => "-".into(),

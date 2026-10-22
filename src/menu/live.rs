@@ -20,9 +20,6 @@ use super::ByteCounter;
 // Alert thresholds. ponytail: first guesses, to adjust with tests (the school network in particular).
 /// One second of video lost per minute.
 pub(super) const DROPPED_PER_MINUTE: u64 = 30;
-/// One second of video must reach the TV well within one second.
-pub(super) const SLOW_FETCH: Duration = Duration::from_millis(500);
-const CONGESTED_FETCH: Duration = Duration::from_millis(900);
 pub(super) const SLOW_ROUND_TRIP: Duration = Duration::from_millis(100);
 /// More buffering periods than this in a minute: the TV does not get the stream in time.
 const BUFFERING_PER_MINUTE: usize = 2;
@@ -48,8 +45,6 @@ pub(super) struct Live {
     pub(super) dropped: Option<Arc<AtomicU64>>,
     /// Dropped frames total, one sample per second, last minute.
     pub(super) dropped_history: VecDeque<u64>,
-    /// Average download time of the last segments by the TV.
-    pub(super) fetch: Option<Duration>,
     /// None until measured; Some(None) when the TV did not answer.
     pub(super) round_trip: Option<Option<Duration>>,
     /// Seconds sampled, to log a summary every 10.
@@ -96,12 +91,10 @@ impl Live {
                 self.dropped_history.pop_front();
             }
         }
-        self.fetch = crate::hls::segment_fetch_time();
         self.samples += 1;
         if self.samples.is_multiple_of(10) {
             tracing::info!(
                 lost_last_minute = self.dropped_last_minute(),
-                fetch_ms = self.fetch.map(|f| f.as_millis() as u64),
                 ping_ms = ?self.round_trip.map(|r| r.map(|r| r.as_millis() as u64)),
                 cpu = self.cpu as u64,
                 "live"
@@ -139,10 +132,6 @@ impl Live {
         let buffering = self.buffering_last_minute();
         if buffering > BUFFERING_PER_MINUTE {
             return Some((format!("The TV buffered {buffering} times in a minute. Lower the bitrate"), Color::Red));
-        }
-        if let Some(fetch) = self.fetch.filter(|f| *f > SLOW_FETCH) {
-            let color = if fetch > CONGESTED_FETCH { Color::Red } else { Color::Yellow };
-            return Some((format!("Network slow: 1 s of video takes {:.1} s to reach the TV. Lower the bitrate", fetch.as_secs_f64()), color));
         }
         if let Some(Some(rtt)) = self.round_trip.filter(|r| r.is_some_and(|r| r > SLOW_ROUND_TRIP)) {
             return Some((format!("Network slow: {} ms to reach the TV", rtt.as_millis()), Color::Yellow));

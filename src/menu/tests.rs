@@ -43,9 +43,6 @@ fn alerts_follow_thresholds() {
     assert!(live.alert().is_none());
     live.round_trip = Some(Some(Duration::from_millis(250)));
     assert_eq!(live.alert().unwrap().1, Color::Yellow);
-    live.fetch = Some(Duration::from_millis(950));
-    assert!(live.alert().unwrap().0.starts_with("Network slow: 1 s of video"));
-    assert_eq!(live.alert().unwrap().1, Color::Red);
     live.buffering = vec![Instant::now(); 3];
     assert!(live.alert().unwrap().0.starts_with("The TV buffered 3 times"));
     live.dropped_history = VecDeque::from([0, 45]);
@@ -118,7 +115,6 @@ fn draws_and_applies_presets() {
     menu.live.started = Instant::now().checked_sub(Duration::from_secs(754));
     menu.live.buffering = vec![Instant::now().checked_sub(Duration::from_secs(400)).unwrap()];
     menu.live.cpu = 62.0;
-    menu.live.fetch = Some(Duration::from_millis(120));
     menu.live.round_trip = Some(Some(Duration::from_millis(3)));
     menu.live.bitrate = (0..60).map(|i| 2500 + (i * 37 % 11) * 40 - 200).collect();
 

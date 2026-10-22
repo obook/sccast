@@ -176,8 +176,6 @@ pub(super) fn stream(
     // A capture failure sets `ended` and comes back as an error: no reconnection then.
     let watcher = capture.watch(ended)?;
 
-    // Segment times of an earlier HLS cast would show in the stats.
-    crate::hls::forget_fetches();
     out.send(menu::Status::Dropped(Arc::clone(&capture.dropped)));
     // Weak: the menu keeps the counter after the cast, the socket and packets must not stay.
     let counted = Arc::downgrade(&session);
