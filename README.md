@@ -24,8 +24,13 @@ about 3 seconds of delay, about 5 if sccast falls back to Google's receiver.
 
 ## Install
 
-KDE neon and Ubuntu 26.04: download the `.deb` for your system from the
-[latest release](https://github.com/obook/sccast/releases/latest), then:
+Download the `.deb` for your system from the
+[latest release](https://github.com/obook/sccast/releases/latest):
+
+- KDE neon: `sccast_<version>-1.neon_amd64.deb`
+- Ubuntu 26.04: `sccast_<version>-1.ubuntu26.04_amd64.deb`
+
+Then:
 
 ```sh
 sudo apt install ./sccast_*_amd64.deb
