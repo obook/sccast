@@ -69,6 +69,8 @@ pub enum Status {
     Resolution((u32, u32)),
     /// Output of the cast's sound source: the audio delay row moves its offset live.
     AudioPad(gstreamer::Pad),
+    /// The screen picker got a new screen: the running cast restarts on it.
+    ScreenPicked,
 }
 
 pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
@@ -153,8 +155,8 @@ impl Menu {
             Status::Dropped(counter) => self.live.dropped = Some(counter),
             Status::NetworkDropped(counter) => self.live.network_dropped = Some(counter),
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
-            // Handled in next(), which holds the settings.
-            Status::Resolution(_) => {}
+            // Handled in next(), which holds the settings and returns actions.
+            Status::Resolution(_) | Status::ScreenPicked => {}
             Status::AudioPad(pad) => self.audio_pad = Some(pad),
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
@@ -254,6 +256,13 @@ impl Menu {
             while let Ok(status) = self.status_rx.try_recv() {
                 if let Status::Resolution(size) = status {
                     self.device_resolution(s, size);
+                    continue;
+                }
+                // A panel reached by its code is not listed: Enter recasts it by hand.
+                if let Status::ScreenPicked = status {
+                    if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
+                        return Ok(Action::Cast(device.clone()));
+                    }
                     continue;
                 }
                 self.set_status(status);

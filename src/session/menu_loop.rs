@@ -188,6 +188,7 @@ fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>, touchbac
                 let said = opened.note().unwrap_or_else(|| said.to_string());
                 *slot.lock().unwrap() = Arc::new(opened);
                 out.say(&said);
+                out.send(menu::Status::ScreenPicked);
             }
             // Not an Error status: that would end the stats of the running cast.
             Err(e) => out.say(&format!("Screen not changed: {e:#}")),
