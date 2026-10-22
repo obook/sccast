@@ -109,7 +109,7 @@ To do:
 
 Done:
 
-- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.0
+- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.1
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
 - [x] Install the v0.3.0 .deb on another KDE neon PC and cast
@@ -117,7 +117,7 @@ Done:
 To do:
 
 - [ ] Split `src/mirror/mod.rs`: 309 lines of code since the reconnection
-- [ ] Install the v0.4.0 .deb on Ubuntu 26.04 and cast
+- [ ] Install the v0.4.1 .deb on Ubuntu 26.04 and cast
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
 - [ ] Cast for one hour without a cut
 - [ ] Stop the screen sharing from the desktop during a cast: the TV must be freed and the error shown
