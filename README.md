@@ -1,5 +1,9 @@
 # sccast
 
+> [!NOTE]
+> Same family: [sbcast](https://github.com/obook/sbcast) for interactive panels,
+> [apcast](https://github.com/obook/apcast) for Apple TV.
+
 `sccast` casts a Linux desktop's screen and sound to a Chromecast or any
 device with Chromecast built-in. By default it uses Google's screen
 mirroring, the one Chrome and Brave use: about 0.15 s of delay on the TV.
@@ -8,8 +12,6 @@ On a device without screen mirroring, sccast casts in HLS instead, served
 over HTTP on your local network and played by sccast's own receiver page:
 about 3 seconds of delay, about 5 if sccast falls back to Google's receiver.
 `--format hls` always uses HLS.
-
-For interactive classroom panels, see [sbcast](https://github.com/obook/sbcast).
 
 ## Requirements
 
