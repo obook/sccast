@@ -25,6 +25,10 @@ pub enum Command {
         /// Discovery duration in seconds.
         #[arg(long, default_value_t = 8)]
         timeout: u64,
+        /// Print a JSON array (name, model, ip, port, id), empty when nothing answers: for
+        /// another program to offer the choice.
+        #[arg(long)]
+        json: bool,
     },
     /// Cast the screen (or a media URL) to a device.
     Cast {

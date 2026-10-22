@@ -55,8 +55,16 @@ fn main() -> anyhow::Result<()> {
     // `sccast` alone opens the cast menu.
     let cli = if std::env::args_os().len() == 1 { Cli::parse_from(["sccast", "cast"]) } else { Cli::parse() };
     match cli.command {
-        Command::List { timeout } => {
+        Command::List { timeout, json } => {
             let devices = spin(session::SEARCHING, || device::discovery::discover(Duration::from_secs(timeout)))?;
+            if json {
+                let list: Vec<_> = devices
+                    .iter()
+                    .map(|d| serde_json::json!({"name": d.name, "model": d.model, "ip": d.ip.to_string(), "port": d.port, "id": d.id}))
+                    .collect();
+                println!("{}", serde_json::Value::Array(list));
+                return Ok(());
+            }
             if devices.is_empty() {
                 bail!("{}", device::discovery::NONE_FOUND);
             }

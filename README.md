@@ -89,6 +89,7 @@ Replace `192.168.1.0/24` with your network.
 ```sh
 sccast                                       # menu: device, presets and settings
 sccast list                                  # devices on the network
+sccast list --json                           # the same, as JSON for another program
 sccast cast                                  # pick a device, then a screen
 sccast cast --device "Living Room TV"        # name or id from `sccast list`
 sccast cast --device "Kitchen" --resolution 1280x720
