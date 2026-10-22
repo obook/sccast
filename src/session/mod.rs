@@ -1,17 +1,17 @@
 //! session/
 //! How one cast runs, from the capture to the TV, and where its progress goes (the terminal
 //! or the menu). menu_loop.rs runs the casts started from the menu; terminal.rs holds the
-//! terminal helpers (spinner, device choice, Ctrl+C).
+//! terminal helpers (spinner, device choice, Ctrl+C); out.rs sends the progress.
 //!
 //! Author: O. Booklage
 //! Date: October 2026
 //! Licence: MIT
 
 mod menu_loop;
+mod out;
 mod terminal;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -20,55 +20,13 @@ use crate::capture::{self, Capture, ScreenCast};
 use crate::device::{self, CastDevice};
 use crate::{cli, hls, menu, mirror};
 pub use menu_loop::run_menu;
+pub use out::Out;
 pub use terminal::{pick_device, spin, stop_flag, SEARCHING};
 
 /// Never set: outside the menu, stopping always closes the receiver app.
 pub static NO_KEEP: AtomicBool = AtomicBool::new(false);
 /// Pause between two launch tries in the menu.
 const RETRY_DELAY: Duration = Duration::from_secs(2);
-
-/// Where cast progress goes: the terminal, with spinners, or the menu.
-#[derive(Clone)]
-pub enum Out {
-    Term,
-    Menu(Sender<menu::Status>),
-}
-
-impl Out {
-    pub fn say(&self, msg: &str) {
-        match self {
-            Out::Term => eprintln!("{msg}"),
-            Out::Menu(_) => self.send(menu::Status::Info(msg.to_string())),
-        }
-    }
-
-    /// Menu only: the terminal shows messages, not stats.
-    pub fn send(&self, status: menu::Status) {
-        if let Out::Menu(tx) = self {
-            let _ = tx.send(status);
-        }
-    }
-
-    pub fn report(&self, r: device::Report) {
-        match r {
-            device::Report::Say(m) => self.say(m),
-            device::Report::Player(state) => self.send(menu::Status::Player(format!("{state:?}"))),
-            device::Report::Reconnecting => self.send(menu::Status::Reconnecting),
-            device::Report::Loaded(..) => {}
-        }
-    }
-
-    /// Run `f`, showing `msg` while it runs.
-    pub fn step<T>(&self, msg: &str, f: impl FnOnce() -> T) -> T {
-        match self {
-            Out::Term => spin(msg, f),
-            Out::Menu(_) => {
-                self.say(msg);
-                f()
-            }
-        }
-    }
-}
 
 /// Serve the capture over HTTP until `stop`; return the stream path, its content type and the server thread.
 pub fn serve(

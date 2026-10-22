@@ -183,6 +183,7 @@ pub(super) fn stream(
     let counted = Arc::downgrade(&session);
     out.send(menu::Status::Served(Box::new(move || counted.upgrade().map_or(0, |s| s.octets()))));
     out.say(&format!("Mirroring to {}. Ctrl+C stops.", device.name));
+    out.state("casting");
     let (sender, control_end) = std::sync::mpsc::channel();
     let control_out = out.clone();
     // Not joined: receive() can block for minutes on a TV gone from the network. The RTCP

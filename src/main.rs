@@ -102,8 +102,9 @@ fn main() -> anyhow::Result<()> {
                 let receiver = session::launch(&device, &settings.receiver, false, stop, &out)?;
                 return receiver.play(&format!("http://{ip}:{port}/media"), "video/mp4", false, stop, &NO_KEEP, &say);
             }
-            let screen = capture::ScreenCast::open()?;
-            session::cast_screen(&device, &settings, &screen, stop, None, &out)
+            let result = capture::ScreenCast::open().and_then(|screen| session::cast_screen(&device, &settings, &screen, stop, None, &out));
+            out.state(if result.is_ok() { "stopped" } else { "error" });
+            result
         }
         Command::Stop { device, receiver: app_id } => {
             let device = pick_device(device.as_deref())?;

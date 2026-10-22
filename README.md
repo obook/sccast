@@ -109,6 +109,12 @@ chooses another screen, `q` or Ctrl+C quits and frees the TV. Closing the
 terminal frees it too. In HLS, the receiver stays open on the TV between two
 casts to the same TV.
 
+For another program that runs `sccast cast --device ...`: messages for
+people go to stderr, and stdout gets one line per change of state,
+`state casting`, `state buffering`, `state reconnecting`, then
+`state stopped` or `state error` at the end. SIGTERM stops the cast and
+frees the TV.
+
 `cast` opens the screen picker, then starts the TV. In HLS it first waits
 about 6 seconds for the stream to fill. Ctrl+C stops the TV at once.
 
