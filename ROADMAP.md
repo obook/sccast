@@ -29,7 +29,6 @@ To do:
 - [ ] Test with a firewall on (ufw, firewalld)
 - [ ] Tune the bitrate and delay steps on a lossy network
 - [ ] Read `rtt_ms` on the school Chromecast (TCP connect took 170 to 500 ms there): delay steps may need to go above 400 ms
-- [ ] Lip sync: sound late in mirror on the Sharp (about 250 ms by eye), not in HLS. Measure it, then decide
 - [ ] Authenticate the TV (Cast device auth, as chromiacast does)
 
 ## Interactive panels
@@ -51,13 +50,13 @@ Done:
 - [x] The receiver page closes itself after 30 s of buffering (sccast gone, PC turned off)
 - [x] Continuous Matroska stream (`--format mkv`): 5 to 6 s of delay, kept as an option
 - [x] Latency 1.5 s by default: at 1 s the Sharp buffered as soon as the PC was in use
+- [x] Remove the "segment sent" measure: it timed the copy to the kernel, not the TV download
 
 To do:
 
 - [ ] Check the TV warning on a congested network (school)
 - [ ] Unpublish the receiver in the Google Cast console and check the fallback to Google's receiver
 - [ ] Test the reconnection on a device that drops the session on a slow network
-- [ ] Decide whether to keep the "segment sent" measure: it only measures the copy to the kernel
 
 ## Menu
 
@@ -68,10 +67,11 @@ Done:
 - [x] Scrollbar and count for long device lists
 - [x] Retry the launch and the reconnection without limit (a first launch on a Chromecast failed after 63 s, the next took 2 s)
 - [x] Closing the terminal or the Konsole tab frees the TV
+- [x] Alert when the TV buffers more than twice a minute
+- [x] Audio delay in 50 ms steps, from -500 to 1500 ms
 
 To do:
 
-- [ ] Alert when the TV buffers often (more than 2 per minute)
 - [ ] Tune the alert thresholds on the school network
 - [ ] Check the launch retry on a cold Chromecast (just plugged in)
 
@@ -103,24 +103,24 @@ which already frees the TV. Linux only until the Windows port.
 Done:
 
 - [x] `sccast list --json`, for another program to offer the device choice
+- [x] State lines on stdout (casting, buffering, reconnecting, stopped, error), messages on stderr
 
 To do:
 
-- [ ] Stable status lines on the output (casting, reconnecting, error), for OpenBoard to show
 - [ ] "Cast to the TV" button in the OpenBoard fork
 
 ## Packaging and code
 
 Done:
 
-- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.2
+- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.3
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
 - [x] Install the v0.3.0 .deb on another KDE neon PC and cast
+- [x] Name a missing GStreamer element and its package at start (a build from source may lack `x264enc`)
 
 To do:
 
-- [ ] Split `src/mirror/mod.rs`: 309 lines of code since the reconnection
 - [ ] Install the v0.4.1 .deb on Ubuntu 26.04 and cast
 - [ ] On Ubuntu 26.04 (GNOME), check the screen picker and the capture timestamps
 - [ ] Cast for one hour without a cut
@@ -128,6 +128,6 @@ To do:
 
 If needed:
 
-- [ ] Detect a missing `x264enc` at start and suggest `openh264enc` or VA-API
+- [ ] Fall back to `openh264enc` or VA-API without `x264enc`
 - [ ] Hardware encoder (`--hw`)
 - [ ] X11 capture (`ximagesrc`)
