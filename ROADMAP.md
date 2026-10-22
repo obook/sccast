@@ -19,7 +19,8 @@ Done:
 - [x] Test on a Nest Hub: takes 1080p in mirror, no adaptive delay. In HLS it plays 720p and refuses 1080p, with a clear message
 - [x] Encode at the screen size the TV reports (Nest Hub: 1280x720); the next cast starts from the user's resolution
 - [x] Force a key frame every second until the TV acknowledges a video frame
-- [x] Change the audio delay during a cast
+- [x] Change the audio delay during a cast (restarts it: a live change froze the image)
+- [x] Negative audio delay: the image waits (-300 ms on the Sharp in mirror)
 
 To do:
 

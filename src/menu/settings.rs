@@ -13,7 +13,7 @@ use crate::device::{DEFAULT_MEDIA_RECEIVER, SCCAST_RECEIVER};
 #[derive(Clone)]
 pub struct Settings {
     pub stream: Stream,
-    pub audio_delay: u64,
+    pub audio_delay: i64,
     pub latency: f64,
     pub receiver: String,
 }
@@ -29,8 +29,9 @@ const BITRATES: [u32; 6] = [1500, 2500, 4000, 6000, 8000, 10000];
 const FPS: [u32; 4] = [25, 30, 50, 60];
 /// None: the receiver page's default (1 s).
 const LATENCIES: [f64; 5] = [1.0, 1.5, 2.0, 3.0, 5.0];
-/// 50 ms steps near 0, to tune lip sync by ear during a cast.
-const AUDIO_DELAYS: [u64; 12] = [0, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500];
+/// 50 ms steps, to tune lip sync by ear. Negative: the image waits.
+const AUDIO_DELAY_STEP: i64 = 50;
+const AUDIO_DELAY_RANGE: (i64, i64) = (-500, 1500);
 /// Row of the audio delay, applied at once to a running cast.
 pub(super) const AUDIO_DELAY_ROW: usize = 6;
 
@@ -62,7 +63,10 @@ pub(super) fn change(s: &mut Settings, row: usize, dir: isize) {
         3 => st.fps = cycle(&FPS, st.fps, dir),
         4 => s.latency = cycle(&LATENCIES, s.latency, dir),
         5 => st.no_audio = !st.no_audio,
-        AUDIO_DELAY_ROW => s.audio_delay = cycle(&AUDIO_DELAYS, s.audio_delay, dir),
+        AUDIO_DELAY_ROW => {
+            let (min, max) = AUDIO_DELAY_RANGE;
+            s.audio_delay = (s.audio_delay + AUDIO_DELAY_STEP * dir as i64).clamp(min, max);
+        }
         7 => s.receiver = cycle(&[SCCAST_RECEIVER, DEFAULT_MEDIA_RECEIVER], s.receiver.as_str(), dir).to_string(),
         _ => st.format = cycle(&[Format::Hls, Format::Mkv, Format::Mirror], st.format, dir),
     }

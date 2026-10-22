@@ -43,8 +43,8 @@ pub struct Capture {
 
 impl Capture {
     /// Capture `screen` and the PC sound, or a test pattern and test ticks when `screen` is None.
-    /// `audio_delay_ms` shifts the sound later to line it up with the image.
-    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay_ms: u64) -> anyhow::Result<Self> {
+    /// `audio_delay_ms` shifts the sound later to line it up with the image, or the image when negative.
+    pub fn start(screen: Option<&ScreenCast>, stream: &Stream, audio_delay_ms: i64) -> anyhow::Result<Self> {
         gst::init()?;
         // XDG_RUNTIME_DIR is a tmpfs: segments never hit the disk.
         let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
@@ -90,9 +90,7 @@ impl Capture {
         };
         tracing::info!(dir = %dir.path().display(), ?tcp_port, "capture started");
         let capture = Self { pipeline, dir, tcp_port, dropped };
-        if let Some(pad) = capture.audio_pad() {
-            set_audio_delay(&pad, audio_delay_ms);
-        }
+        set_audio_delay(&capture.pipeline, audio_delay_ms);
         Ok(capture)
     }
 
@@ -100,11 +98,6 @@ impl Capture {
     pub fn served(&self) -> Option<impl Fn() -> u64 + Send + 'static> {
         let out = self.pipeline.downcast_ref::<gst::Bin>()?.by_name("out")?;
         Some(move || out.property::<u64>("bytes-served"))
-    }
-
-    /// Output of the sound source: the menu moves its offset to change the audio delay live.
-    pub fn audio_pad(&self) -> Option<gst::Pad> {
-        self.pipeline.downcast_ref::<gst::Bin>()?.by_name("asrc")?.static_pad("src")
     }
 
     /// The pipeline, for its running time (mirror format).
@@ -174,9 +167,15 @@ impl Drop for Capture {
     }
 }
 
-/// Delay the sound by `ms`, on a running pipeline too (the menu changes it during a cast).
-pub fn set_audio_delay(pad: &gst::Pad, ms: u64) {
-    pad.set_offset(i64::try_from(ms).unwrap_or(0).saturating_mul(1_000_000));
+/// Delay the sound by `ms`, or the screen image when `ms` is negative (the Sharp plays the
+/// mirror sound late: -300 ms fixed it). Only at the start: changed live, it froze the image.
+fn set_audio_delay(pipeline: &gst::Element, ms: i64) {
+    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
+    for (source, delay) in [("asrc", ms), ("src", -ms)] {
+        if let Some(pad) = bin.by_name(source).and_then(|e| e.static_pad("src")) {
+            pad.set_offset(delay.max(0).saturating_mul(1_000_000));
+        }
+    }
 }
 
 /// Ask `encoder` for a key frame with SPS and PPS.

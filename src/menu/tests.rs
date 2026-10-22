@@ -25,6 +25,19 @@ fn cycles_and_wraps() {
 }
 
 #[test]
+fn audio_delay_moves_by_50_ms_and_stops_at_the_ends() {
+    let mut s = settings(2500);
+    change(&mut s, AUDIO_DELAY_ROW, -1);
+    assert_eq!(s.audio_delay, -50);
+    s.audio_delay = -500;
+    change(&mut s, AUDIO_DELAY_ROW, -1);
+    assert_eq!(s.audio_delay, -500);
+    s.audio_delay = 1500;
+    change(&mut s, AUDIO_DELAY_ROW, 1);
+    assert_eq!(s.audio_delay, 1500);
+}
+
+#[test]
 fn alerts_follow_thresholds() {
     let mut live = Live::default();
     assert!(live.alert().is_none());

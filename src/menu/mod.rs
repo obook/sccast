@@ -64,8 +64,6 @@ pub enum Status {
     RoundTrip(Option<Duration>),
     /// The cast went down to this resolution (the TV refused the one set).
     Resolution((u32, u32)),
-    /// Output of the cast's sound source: the audio delay row moves its offset live.
-    AudioPad(gstreamer::Pad),
     /// The screen picker got a new screen: the running cast restarts on it.
     ScreenPicked,
 }
@@ -89,8 +87,8 @@ pub struct Menu {
     live: Live,
     /// The user's resolution while the menu shows the one a device took (Nest Hub: 1280x720).
     chosen_resolution: Option<(u32, u32)>,
-    /// Sound source of the running cast, for the live audio delay.
-    audio_pad: Option<gstreamer::Pad>,
+    /// When to restart the running cast with a new audio delay: 1 s after the last key press.
+    recast_at: Option<Instant>,
 }
 
 impl Menu {
@@ -119,7 +117,7 @@ impl Menu {
             status_rx,
             live: Live::default(),
             chosen_resolution: None,
-            audio_pad: None,
+            recast_at: None,
         }
     }
 
@@ -150,31 +148,26 @@ impl Menu {
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
             // Handled in next(), which holds the settings and returns actions.
             Status::Resolution(_) | Status::ScreenPicked => {}
-            Status::AudioPad(pad) => self.audio_pad = Some(pad),
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
-                self.audio_pad = None;
+                self.recast_at = None;
                 self.live.started = None;
                 self.status = status;
             }
         }
     }
 
-    /// Change the selected setting by hand. The audio delay also applies to the running cast.
+    /// Change the selected setting by hand. A new audio delay restarts the running cast.
     fn change_setting(&mut self, s: &mut Settings, dir: isize) {
         let row = self.row.selected().unwrap_or(0);
         self.chosen_resolution = None;
         change(s, row, dir);
+        // Moving the offsets of a running pipeline froze the Sharp and doubled the CPU, in
+        // mirror (2026-10-22) and in HLS: the delay is only set when a cast starts.
         if row == AUDIO_DELAY_ROW && self.casting.is_some() {
-            match &self.audio_pad {
-                Some(pad) => {
-                    crate::capture::set_audio_delay(pad, s.audio_delay);
-                    tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
-                }
-                // HLS: only screen mirroring takes it live.
-                None => self.status = Status::Info("Audio delay: applies at the next cast".into()),
-            }
+            self.recast_at = Some(Instant::now() + Duration::from_secs(1));
+            self.status = Status::Info(format!("Audio delay {} ms: restarting the cast...", s.audio_delay));
         }
     }
 
@@ -256,6 +249,13 @@ impl Menu {
                     continue;
                 }
                 self.set_status(status);
+            }
+            if self.recast_at.is_some_and(|at| Instant::now() >= at) {
+                self.recast_at = None;
+                if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
+                    tracing::info!(ms = s.audio_delay, "audio delay changed: restarting the cast");
+                    return Ok(Action::Cast(device.clone()));
+                }
             }
             if self.live.started.is_some() {
                 self.live.sample();
