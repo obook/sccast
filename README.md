@@ -1,8 +1,11 @@
+<img src="media/icon.svg" alt="sccast logo" width="128">
+
 # sccast
 
 > [!NOTE]
-> Same family: [sbcast](https://github.com/obook/sbcast) for interactive panels (screenshare),
-> [sacast](https://github.com/obook/sacast) for Apple TV.
+> Same family:
+> - <img src="https://raw.githubusercontent.com/obook/sbcast/main/media/icon.svg" alt="" width="20"> [sbcast](https://github.com/obook/sbcast) for interactive panels (screenshare)
+> - <img src="https://raw.githubusercontent.com/obook/sacast/main/media/icon.svg" alt="" width="20"> [sacast](https://github.com/obook/sacast) for Apple TV
 
 `sccast` casts a Linux desktop's screen and sound to a Chromecast or any
 device with Chromecast built-in. By default it uses Google's screen
