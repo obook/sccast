@@ -1,0 +1,51 @@
+# Build the two .deb packages with packaging/build-deb.sh and attach them to the release.
+#
+# It runs when a release is published: releases are made by hand, so the release already
+# exists and there is nothing to wait for. Run it by hand to check that both packages still
+# build before tagging.
+#
+# actions/checkout is pinned by SHA because the release path runs with a write-scoped token.
+
+name: deb
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write  # only used by the upload step, which runs on releases
+    strategy:
+      # A package that fails to build must not keep the other one off the release.
+      fail-fast: false
+      matrix:
+        target: [neon, ubuntu26.04]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      # The package takes its version from Cargo.toml: a forgotten bump would attach the old one.
+      - name: check the tag matches Cargo.toml
+        if: github.event_name == 'release'
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+            exit 1
+          fi
+
+      - name: build the package
+        run: packaging/build-deb.sh ${{ matrix.target }}
+
+      - name: attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" target/debian/sccast_*.deb --repo "$GITHUB_REPOSITORY" --clobber
