@@ -26,12 +26,14 @@ pub fn describe(screen: Option<&ScreenCast>, stream: &Stream) -> String {
         Some(screen) => format!(
             "pipewiresrc name=src fd={} path={} keepalive-time=100 \
              ! queue name=vq leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 \
-             ! videorate",
+             ! videorate name=rate",
             screen.fd(),
             screen.node_id
         ),
     };
-    let mut description = format!("{source} ! videoconvert ! videoscale ! {}", video_encode(stream));
+    // One thread by default: BGRA to I420 at 1080p60 does not fit on one core (frames lost on an i5-7600).
+    let mut description =
+        format!("{source} ! videoconvert n-threads=0 ! videoscale n-threads=0 ! {}", video_encode(stream));
     if !stream.no_audio {
         let audio_source = match screen {
             None => "audiotestsrc name=asrc is-live=true wave=ticks volume=0.3",
