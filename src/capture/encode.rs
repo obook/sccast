@@ -15,25 +15,32 @@ pub const MKV: &str = "live.mkv";
 
 /// The whole pipeline for `stream`, from `screen` or a test pattern when it is None.
 pub fn describe(screen: Option<&ScreenCast>, stream: &Stream) -> String {
-    let source = match screen {
-        None => "videotestsrc is-live=true".to_string(),
+    let (source, rate) = match screen {
+        None => ("videotestsrc is-live=true".to_string(), ""),
         // `path` takes the node id; `target-object` wants the node serial, which the portal does not give.
         // PipeWire only sends frames on screen damage: keepalive resends the last one so a still
         // screen keeps producing segments, and videorate turns it into a constant frame rate.
         // Frames are stamped when pipewiresrc hands them out: the queue gives the encoding
         // its own thread, so a slow frame no longer holds the next ones in PipeWire (late
         // stamps put the sound ahead of the image). Leaky: drop frames rather than lag.
-        Some(screen) => format!(
-            "pipewiresrc name=src fd={} path={} keepalive-time=100 \
-             ! queue name=vq leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 \
-             ! videorate name=rate",
-            screen.fd(),
-            screen.node_id
+        // Conversion sees only real frames: `limit` drops those above the fps setting before it
+        // (a video sends up to 60), `rate` adds the duplicates after it. drop-only needs the
+        // fixed framerate after it: max-rate lets everything through from PipeWire's variable rate.
+        Some(screen) => (
+            format!(
+                "pipewiresrc name=src fd={} path={} keepalive-time=100 \
+                 ! queue name=vq leaky=downstream max-size-buffers=3 max-size-bytes=0 max-size-time=0 \
+                 ! videorate name=limit drop-only=true ! video/x-raw,framerate={}/1",
+                screen.fd(),
+                screen.node_id,
+                stream.fps
+            ),
+            " ! videorate name=rate",
         ),
     };
     // One thread by default: BGRA to I420 at 1080p60 does not fit on one core (frames lost on an i5-7600).
     let mut description =
-        format!("{source} ! videoconvert n-threads=0 ! videoscale n-threads=0 ! {}", video_encode(stream));
+        format!("{source} ! videoconvert n-threads=0 ! videoscale n-threads=0{rate} ! {}", video_encode(stream));
     if !stream.no_audio {
         let audio_source = match screen {
             None => "audiotestsrc name=asrc is-live=true wave=ticks volume=0.3",

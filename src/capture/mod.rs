@@ -79,8 +79,8 @@ impl Capture {
                 None
             });
         }
-        if let Some(rate) = bin.by_name("rate") {
-            log_frame_rate(&rate)?;
+        if let (Some(limit), Some(rate)) = (bin.by_name("limit"), bin.by_name("rate")) {
+            log_frame_rate(limit, &rate)?;
         }
         if stream.format == Format::Hls {
             let sink = bin.by_name("sink").context("hlssink2 not found in pipeline")?;
@@ -212,8 +212,9 @@ fn restamp_on_arrival(src: &gst::Element, pipeline: &gst::Element) -> anyhow::Re
 }
 
 /// Every 5 s, log the frames the screen really sent against the ones videorate made up:
-/// the fps setting is the output rate, duplicates fill whatever the screen does not send.
-fn log_frame_rate(rate: &gst::Element) -> anyhow::Result<()> {
+/// the fps setting is the output rate, `limit` drops what the screen sends above it and
+/// `rate` duplicates to fill what it does not send.
+fn log_frame_rate(limit: gst::Element, rate: &gst::Element) -> anyhow::Result<()> {
     const PERIOD: Duration = Duration::from_secs(5);
     let pad = rate.static_pad("src").context("videorate has no src pad")?;
     let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64, 0u64, 0u64));
@@ -222,8 +223,11 @@ fn log_frame_rate(rate: &gst::Element) -> anyhow::Result<()> {
         let elapsed = last.0.elapsed();
         if elapsed >= PERIOD {
             if let Some(rate) = pad.parent_element() {
-                let (input, dup, drop) =
-                    (rate.property::<u64>("in"), rate.property::<u64>("duplicate"), rate.property::<u64>("drop"));
+                let (input, dup, drop) = (
+                    limit.property::<u64>("in"),
+                    rate.property::<u64>("duplicate"),
+                    limit.property::<u64>("drop") + rate.property::<u64>("drop"),
+                );
                 let secs = elapsed.as_secs_f64();
                 tracing::info!(
                     screen_fps = format!("{:.1}", (input - last.1) as f64 / secs),
