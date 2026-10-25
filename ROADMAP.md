@@ -21,6 +21,8 @@ Done:
 - [x] Force a key frame every second until the TV acknowledges a video frame
 - [x] Change the audio delay during a cast (restarts it: a live change froze the image)
 - [x] Negative audio delay: the image waits (-300 ms on the Sharp in mirror)
+- [x] Convert the frames on every core: an i5-7600 lost about 7 frames a second at 1080p60
+- [x] Convert only the frames the screen sends: during a video, 24 to 32 real frames a second reach the Nest Hub instead of 13 to 25
 
 To do:
 
@@ -113,7 +115,8 @@ To do:
 
 Done:
 
-- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.3
+- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.4
+- [x] GitHub builds the .deb packages and attaches them when a release is published
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
 - [x] Install the v0.3.0 .deb on another KDE neon PC and cast
