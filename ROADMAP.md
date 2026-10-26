@@ -26,12 +26,12 @@ Done:
 - [x] Convert only the frames the screen sends: during a video, 24 to 32 real frames a second reach the Nest Hub instead of 13 to 25
 - [x] Test on a 77" OLED TV (S85F, Cast built in): mirror works, the TV reports a 3840x2160 screen at 60 fps, relaunches take 2.5 to 5 s
 - [x] The menu's Format line shows HLS during the HLS fallback (it showed Mirror); the next cast tries mirror again
+- [x] Launch the receiver again when the TV cancels the launch while it wakes from standby (S85F: mirroring 8 s after the cast, instead of HLS)
 
 To do:
 
 - [ ] Test on the school Chromecast
 - [ ] Test the HLS fallback on a device without mirroring, and the Format line shown then
-- [ ] S85F: the first launch of the evening was refused (`CANCELLED` after 7 s) and the cast fell back to HLS for 3 min, while the next launches worked. Test a cold launch (TV on another source for a minute); if it is refused again, retry the mirroring launch once before falling back to HLS
 - [ ] CPU on an i7-9750H during a YouTube video at 1080p: about 300 % of a core in mirror (up to 545 %), 200 % in HLS (up to 466 %), and the capture fell to 41-50 frames a second. Profile the frame conversion with perf
 - [ ] Test with a firewall on (ufw, firewalld)
 - [ ] Tune the bitrate and delay steps on a lossy network

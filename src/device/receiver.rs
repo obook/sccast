@@ -115,7 +115,15 @@ fn start(device: &Device, app_id: &str, reuse: bool) -> anyhow::Result<Receiver>
         cast.receiver.stop_app(old.session_id.clone())?;
     }
 
-    let app = match cast.receiver.launch_app(&CastDeviceApp::Custom(app_id.to_string())) {
+    let requested = CastDeviceApp::Custom(app_id.to_string());
+    let mut launched = cast.receiver.launch_app(&requested);
+    // A Samsung TV in standby (S85F) cancels the launch while it wakes up: a launch sent right
+    // after started 6 s later (2026-10-26).
+    if launched.as_ref().is_err_and(|e| e.to_string().contains("(CANCELLED)")) {
+        tracing::info!("launch cancelled, the TV may be waking up: trying again");
+        launched = cast.receiver.launch_app(&requested);
+    }
+    let app = match launched {
         Ok(app) => app,
         // The menu tries sccast's receiver again: its next launch took 2 s, Google's plays 5 s late.
         Err(e) if reuse && e.to_string().contains("CAST_INIT_TIMEOUT") => {
