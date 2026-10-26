@@ -62,6 +62,7 @@ pub fn cast_screen(
         }
         out.say(&format!("{} has no screen mirroring: casting in HLS (2 to 3 s of delay).", device.name));
         hls_settings = menu::Settings { stream: cli::Stream { format: cli::Format::Hls, ..s.stream.clone() }, ..s.clone() };
+        out.send(menu::Status::Stream(hls_settings.stream.clone()));
         // The menu does not track this receiver (it expected mirror): always close it at the stop.
         (&hls_settings, None)
     } else {

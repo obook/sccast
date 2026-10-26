@@ -61,20 +61,27 @@ fn settings(bitrate: u32) -> Settings {
 }
 
 #[test]
-fn user_resolution_comes_back_after_a_device_lowered_it() {
+fn user_stream_comes_back_after_a_device_changed_it() {
     let mut menu = Menu::idle();
     let mut s = settings(2500);
+    s.stream.format = Format::Mirror;
+    let user = s.stream.clone();
     // The Nest Hub took 1280x720: the menu shows it.
-    menu.device_resolution(&mut s, (1280, 720));
+    menu.device_stream(&mut s, Stream { resolution: (1280, 720), ..user.clone() });
     assert_eq!(s.stream.resolution, (1280, 720));
     // The next cast (the Sharp) starts from the user's 1920x1080.
-    menu.restore_resolution(&mut s);
+    menu.restore_stream(&mut s);
     assert_eq!(s.stream.resolution, (1920, 1080));
+    // A TV without mirroring: the menu shows HLS, the next cast tries mirror again.
+    menu.device_stream(&mut s, Stream { format: Format::Hls, ..user.clone() });
+    assert!(value(&s, 8) == "HLS");
+    menu.restore_stream(&mut s);
+    assert!(s.stream.format == Format::Mirror);
     // A resolution set by hand stays.
-    menu.device_resolution(&mut s, (1280, 720));
-    menu.chosen_resolution = None;
+    menu.device_stream(&mut s, Stream { resolution: (1280, 720), ..user.clone() });
+    menu.chosen_stream = None;
     s.stream.resolution = (854, 480);
-    menu.restore_resolution(&mut s);
+    menu.restore_stream(&mut s);
     assert_eq!(s.stream.resolution, (854, 480));
 }
 

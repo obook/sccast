@@ -132,7 +132,7 @@ pub(super) fn stream(
     if settings.resolution != s.stream.resolution {
         let (width, height) = settings.resolution;
         out.say(&format!("Sending {width}x{height}, the size {} takes.", device.name));
-        out.send(menu::Status::Resolution(settings.resolution));
+        out.send(menu::Status::Stream(settings.clone()));
     }
     // The capture starts once the TV is ready: frames would pile up before.
     settings.no_audio = !answer.audio;
