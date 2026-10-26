@@ -182,6 +182,12 @@ fn set_audio_delay(pipeline: &gst::Element, ms: i64) {
             pad.set_offset(delay.max(0).saturating_mul(1_000_000));
         }
     }
+    // Mirror: the TV plays the sound as it arrives, whatever its date, so dating it later
+    // was not enough: send each frame only when its date comes. No 20 ms deadline on top.
+    if let Some(sink) = bin.by_name("asink").filter(|_| ms > 0) {
+        sink.set_property("processing-deadline", 0u64);
+        sink.set_property("sync", true);
+    }
 }
 
 /// Ask `encoder` for a key frame with SPS and PPS.

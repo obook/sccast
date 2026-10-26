@@ -89,12 +89,17 @@ fn video_encode(stream: &Stream) -> String {
     )
 }
 
-/// Mirror: Opus in 10 ms frames, each one a Cast frame.
+/// Mirror: Opus in 10 ms frames, each one a Cast frame. The queue holds the sound while
+/// asink waits for its date (positive audio delay, up to 1.5 s), so pulsesrc never blocks.
 fn audio_encode(format: Format) -> String {
     let encode = match format {
         Format::Hls => "avenc_aac bitrate=128000 ! aacparse ! sink.audio",
         Format::Mkv => "avenc_aac bitrate=128000 ! aacparse ! sink.audio_%u",
-        Format::Mirror => "opusenc bitrate=128000 frame-size=10 ! appsink name=asink sync=false max-buffers=20",
+        Format::Mirror => {
+            "opusenc bitrate=128000 frame-size=10 \
+             ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=2000000000 \
+             ! appsink name=asink sync=false max-buffers=20"
+        }
     };
     format!("audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! {encode}")
 }
