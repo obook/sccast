@@ -28,7 +28,7 @@ impl Menu {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             // Stop early once the menu is gone (send fails).
-            let result = discovery::browse(Duration::from_secs(8), |d| tx.send(Found::Device(d)).is_err());
+            let result = discovery::browse(Duration::from_secs(12), |d| tx.send(Found::Device(d)).is_err());
             if let Err(e) = result {
                 tracing::warn!("discovery failed: {e:#}");
             }
