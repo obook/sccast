@@ -16,7 +16,8 @@ use anyhow::bail;
 
 use crate::device::{discovery, CastDevice};
 
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
+// mdns-sd asks at 0, 1, 3 and 7 s; a slow network answers in up to 5 s, so the 7 s query needs 12 s.
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(12);
 pub const SEARCHING: &str = "Searching for Chromecast devices, please wait...";
 const STDERR: i32 = 2;
 

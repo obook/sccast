@@ -23,7 +23,7 @@ pub enum Command {
     /// List Chromecast devices on the local network.
     List {
         /// Discovery duration in seconds.
-        #[arg(long, default_value_t = 8)]
+        #[arg(long, default_value_t = 12)]
         timeout: u64,
         /// Print a JSON array (name, model, ip, port, id), empty when nothing answers: for
         /// another program to offer the choice.
