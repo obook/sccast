@@ -57,8 +57,8 @@ impl Menu {
                 }
             }
             while let Ok(status) = self.status_rx.try_recv() {
-                if let Status::Resolution(size) = status {
-                    self.device_resolution(s, size);
+                if let Status::Stream(stream) = status {
+                    self.device_stream(s, stream);
                     continue;
                 }
                 // A device gone from the list since (rescan): Enter recasts by hand.

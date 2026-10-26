@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 use ratatui::DefaultTerminal;
 
+use crate::cli;
 use crate::device::CastDevice;
 use live::Live;
 pub use settings::Settings;
@@ -62,8 +63,9 @@ pub enum Status {
     Dropped(Arc<AtomicU64>),
     /// Time to connect to the TV's Cast port, None if it did not answer.
     RoundTrip(Option<Duration>),
-    /// The cast went down to this resolution (the TV refused the one set).
-    Resolution((u32, u32)),
+    /// The cast runs with these settings, not the user's: a lower resolution (the TV refused
+    /// the one set or has a smaller screen) or HLS (the mirroring receiver did not start).
+    Stream(cli::Stream),
     /// The screen picker got a new screen: the running cast restarts on it.
     ScreenPicked,
 }
@@ -85,8 +87,9 @@ pub struct Menu {
     status_tx: Sender<Status>,
     status_rx: Receiver<Status>,
     live: Live,
-    /// The user's resolution while the menu shows the one a device took (Nest Hub: 1280x720).
-    chosen_resolution: Option<(u32, u32)>,
+    /// The user's stream settings while the menu shows the ones a device took (Nest Hub:
+    /// 1280x720, a TV without mirroring: HLS).
+    chosen_stream: Option<cli::Stream>,
     /// When to restart the running cast with a new audio delay: 1 s after the last key press.
     recast_at: Option<Instant>,
 }
@@ -116,7 +119,7 @@ impl Menu {
             status_tx,
             status_rx,
             live: Live::default(),
-            chosen_resolution: None,
+            chosen_stream: None,
             recast_at: None,
         }
     }
@@ -147,7 +150,7 @@ impl Menu {
             Status::Dropped(counter) => self.live.dropped = Some(counter),
             Status::RoundTrip(time) => self.live.round_trip = Some(time),
             // Handled in next(), which holds the settings and returns actions.
-            Status::Resolution(_) | Status::ScreenPicked => {}
+            Status::Stream(_) | Status::ScreenPicked => {}
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
@@ -161,7 +164,7 @@ impl Menu {
     /// Change the selected setting by hand. A new audio delay restarts the running cast.
     fn change_setting(&mut self, s: &mut Settings, dir: isize) {
         let row = self.row.selected().unwrap_or(0);
-        self.chosen_resolution = None;
+        self.chosen_stream = None;
         change(s, row, dir);
         // Moving the offsets of a running pipeline froze the Sharp and doubled the CPU, in
         // mirror (2026-10-22) and in HLS: the delay is only set when a cast starts.
@@ -171,16 +174,16 @@ impl Menu {
         }
     }
 
-    /// A device took another resolution: show it, keep the user's for the next cast.
-    fn device_resolution(&mut self, s: &mut Settings, size: (u32, u32)) {
-        self.chosen_resolution.get_or_insert(s.stream.resolution);
-        s.stream.resolution = size;
+    /// A device took other stream settings: show them, keep the user's for the next cast.
+    fn device_stream(&mut self, s: &mut Settings, stream: cli::Stream) {
+        self.chosen_stream.get_or_insert_with(|| s.stream.clone());
+        s.stream = stream;
     }
 
-    /// Before a cast: back to the user's resolution, which the device may lower again.
-    pub fn restore_resolution(&mut self, s: &mut Settings) {
-        if let Some(size) = self.chosen_resolution.take() {
-            s.stream.resolution = size;
+    /// Before a cast: back to the user's stream settings, which the device may change again.
+    pub fn restore_stream(&mut self, s: &mut Settings) {
+        if let Some(stream) = self.chosen_stream.take() {
+            s.stream = stream;
         }
     }
 
