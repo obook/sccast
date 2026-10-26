@@ -1,6 +1,6 @@
 [package]
 name = "sccast"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 # Set by gstreamer 0.25. Resolver 3 picks dependency versions that build with it.
 rust-version = "1.92"
