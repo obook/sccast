@@ -48,3 +48,8 @@ assets = [
     ["target/release/sccast", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/sccast/", "644"],
 ]
+
+# rust_cast 0.21.0 with one patch in src/lib.rs (NoCertificateVerification): accept the
+# X.509 v1 certificates of some TVs, which fail with UnsupportedCertVersion.
+[patch.crates-io]
+rust_cast = { path = "vendor/rust_cast" }
