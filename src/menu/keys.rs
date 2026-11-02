@@ -17,22 +17,30 @@ use super::{Action, Found, Menu, Settings, Status};
 use crate::device::{discovery, CastDevice};
 
 impl Menu {
-    /// Browse in a thread; devices show up as they answer.
+    /// Browse in a thread while the menu is open; devices show up as they answer.
+    /// A busy network loses answers: each round asks again and adds the late devices.
     pub(super) fn scan(&mut self) {
-        if self.scanning {
-            return;
-        }
         self.scanning = true;
         // Devices gone since the last scan (unplugged, new address) must not stay listed.
         self.devices.clear();
+        if self.browsing {
+            // The round under way began before the clear: wait for the next full one.
+            self.skip_done = true;
+            return;
+        }
+        self.browsing = true;
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
+        // ponytail: a new round every 12 s for the menu's lifetime; slow it down if a large network minds the traffic.
+        std::thread::spawn(move || loop {
             // Stop early once the menu is gone (send fails).
             let result = discovery::browse(Duration::from_secs(12), |d| tx.send(Found::Device(d)).is_err());
             if let Err(e) = result {
                 tracing::warn!("discovery failed: {e:#}");
+                std::thread::sleep(Duration::from_secs(12));
             }
-            let _ = tx.send(Found::Done);
+            if tx.send(Found::Done).is_err() {
+                break;
+            }
         });
     }
 
@@ -53,6 +61,7 @@ impl Menu {
                 match found {
                     // Keyed by id: a device answers several times.
                     Found::Device(d) => drop(self.devices.insert(d.id.clone(), d)),
+                    Found::Done if self.skip_done => self.skip_done = false,
                     Found::Done => self.scanning = false,
                 }
             }
