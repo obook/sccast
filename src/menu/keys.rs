@@ -21,8 +21,10 @@ impl Menu {
     /// A busy network loses answers: each round asks again and adds the late devices.
     pub(super) fn scan(&mut self) {
         self.scanning = true;
-        // Devices gone since the last scan (unplugged, new address) must not stay listed.
-        self.devices.clear();
+        // Devices gone since the last scan (unplugged, new address) must not stay listed, except
+        // the remembered ones: a busy network may hide devices that are there.
+        self.devices = discovery::remembered().into_iter().map(|d| (d.id.clone(), d)).collect();
+        self.answered.clear();
         if self.browsing {
             // The round under way began before the clear: wait for the next full one.
             self.skip_done = true;
@@ -32,6 +34,11 @@ impl Menu {
         let tx = self.tx.clone();
         // ponytail: a new round every 12 s for the menu's lifetime; slow it down if a large network minds the traffic.
         std::thread::spawn(move || loop {
+            // A school Wi-Fi drops most mDNS multicast but lets a ping through. The file is read
+            // each round, for the devices first seen during the previous one.
+            if discovery::ping_all(&discovery::remembered()).into_iter().any(|id| tx.send(Found::Alive(id)).is_err()) {
+                break;
+            }
             // Stop early once the menu is gone (send fails).
             let result = discovery::browse(Duration::from_secs(12), |d| tx.send(Found::Device(d)).is_err());
             if let Err(e) = result {
@@ -60,7 +67,17 @@ impl Menu {
             while let Ok(found) = self.rx.try_recv() {
                 match found {
                     // Keyed by id: a device answers several times.
-                    Found::Device(d) => drop(self.devices.insert(d.id.clone(), d)),
+                    Found::Device(d) => {
+                        self.answered.insert(d.id.clone());
+                        discovery::seen(&d);
+                        self.devices.insert(d.id.clone(), d);
+                    }
+                    Found::Alive(id) => {
+                        if let Some(d) = self.devices.get(&id) {
+                            discovery::seen(d);
+                        }
+                        self.answered.insert(id);
+                    }
                     Found::Done if self.skip_done => self.skip_done = false,
                     Found::Done => self.scanning = false,
                 }
