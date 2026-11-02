@@ -15,7 +15,7 @@ mod settings;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -33,6 +33,8 @@ use settings::{change, AUDIO_DELAY_ROW};
 
 enum Found {
     Device(CastDevice),
+    /// A remembered device answered a ping: there, though its mDNS answer may not come through.
+    Alive(String),
     Done,
 }
 
@@ -74,6 +76,8 @@ pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
 
 pub struct Menu {
     devices: BTreeMap<String, CastDevice>,
+    /// Ids that answered since the last scan; the others come from the devices file only.
+    answered: HashSet<String>,
     device: ListState,
     row: ListState,
     on_settings: bool,
@@ -111,6 +115,7 @@ impl Menu {
         let (status_tx, status_rx) = mpsc::channel();
         Self {
             devices: BTreeMap::new(),
+            answered: HashSet::new(),
             device: ListState::default().with_selected(Some(0)),
             row: ListState::default().with_selected(Some(0)),
             on_settings: false,
