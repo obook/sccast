@@ -78,6 +78,10 @@ pub struct Menu {
     row: ListState,
     on_settings: bool,
     scanning: bool,
+    /// The browse thread runs (it never stops before the menu).
+    browsing: bool,
+    /// Ignore the end of the round under way: it began before a rescan cleared the list.
+    skip_done: bool,
     tick: usize,
     tx: Sender<Found>,
     rx: Receiver<Found>,
@@ -111,6 +115,8 @@ impl Menu {
             row: ListState::default().with_selected(Some(0)),
             on_settings: false,
             scanning: false,
+            browsing: false,
+            skip_done: false,
             tick: 0,
             tx,
             rx,
