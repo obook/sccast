@@ -28,6 +28,7 @@ Done:
 - [x] The menu's Format line shows HLS during the HLS fallback (it showed Mirror); the next cast tries mirror again
 - [x] Launch the receiver again when the TV cancels the launch while it wakes from standby (S85F: mirroring 8 s after the cast, instead of HLS)
 - [x] Keep searching for devices while the menu is open, and search 20 s in `sccast list`: on a busy school network, one 12 s search found 2 to 4 of the 6 devices
+- [x] Remember the devices seen: green when they answer (mDNS or ping), dark gray when only remembered, forgotten after 3 weeks of silence
 
 To do:
 
@@ -121,7 +122,7 @@ To do:
 
 Done:
 
-- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.6
+- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.4.7
 - [x] GitHub builds the .deb packages and attaches them when a release is published
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
