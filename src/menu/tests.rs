@@ -52,7 +52,7 @@ fn alerts_follow_thresholds() {
 }
 
 fn device(id: &str, name: &str, model: &str) -> CastDevice {
-    CastDevice { id: id.into(), name: name.into(), model: model.into(), ip: std::net::Ipv4Addr::LOCALHOST, port: 8009 }
+    CastDevice { id: id.into(), name: name.into(), model: model.into(), ip: std::net::Ipv4Addr::LOCALHOST, port: 8009, busy: String::new() }
 }
 
 fn settings(bitrate: u32) -> Settings {

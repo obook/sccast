@@ -48,6 +48,26 @@ pub fn stop(device: &Device, app_id: &str, session: Option<&str>) -> anyhow::Res
     Ok(true)
 }
 
+/// Backdrop: a Chromecast's idle screen (photos), not an app someone casts.
+const BACKDROP: &str = "E8C28D3C";
+
+/// Name of the app another sender runs on `device` (YouTube, a Chrome tab...), None when it
+/// is idle. Only reads the status: what plays goes on.
+pub fn running(device: &Device) -> anyhow::Result<Option<String>> {
+    // rust_cast connects without a timeout: an unreachable device would hold the check minutes.
+    std::net::TcpStream::connect_timeout(&(device.ip, device.port).into(), Duration::from_secs(2))
+        .with_context(|| format!("cannot connect to {} ({}:{})", device.name, device.ip, device.port))?;
+    let cast = connect(device)?;
+    Ok(other_app(cast.receiver.get_status()?.applications))
+}
+
+/// The first app that is neither the idle screen nor sccast's own receiver (left open by an
+/// earlier menu). The mirroring and Default Media receivers count: Chrome uses them too.
+fn other_app(apps: Vec<Application>) -> Option<String> {
+    let app = apps.into_iter().find(|a| a.app_id != BACKDROP && a.app_id != SCCAST_RECEIVER)?;
+    Some(if app.display_name.is_empty() { app.app_id } else { app.display_name })
+}
+
 /// Stop the media playing in a receiver app, leaving the app open.
 pub(super) fn stop_media(device: &Device, transport_id: &str, media_session: i32) -> anyhow::Result<()> {
     let cast = connect(device)?;
@@ -162,5 +182,29 @@ impl Receiver {
         if let Err(e) = self.cast.receiver.stop_app(self.app.session_id.clone()) {
             tracing::warn!("cannot close the receiver app: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(app_id: &str, display_name: &str) -> Application {
+        Application {
+            app_id: app_id.into(),
+            display_name: display_name.into(),
+            session_id: String::new(),
+            transport_id: String::new(),
+            namespaces: Vec::new(),
+            status_text: String::new(),
+        }
+    }
+
+    #[test]
+    fn finds_apps_of_other_senders_only() {
+        assert_eq!(other_app(vec![app(BACKDROP, "Backdrop")]), None);
+        assert_eq!(other_app(vec![app(SCCAST_RECEIVER, "sccast")]), None);
+        assert_eq!(other_app(vec![app(BACKDROP, "Backdrop"), app("233637DE", "YouTube")]), Some("YouTube".into()));
+        assert_eq!(other_app(vec![app("0F5096E8", "")]), Some("0F5096E8".into()));
     }
 }
