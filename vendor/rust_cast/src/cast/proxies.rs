@@ -482,10 +482,10 @@ pub mod receiver {
         #[serde(default)]
         pub namespaces: Vec<AppNamespace>,
 
-        #[serde(rename = "displayName")]
+        #[serde(rename = "displayName", default)]
         pub display_name: String,
 
-        #[serde(rename = "statusText")]
+        #[serde(rename = "statusText", default)]
         pub status_text: String,
     }
 

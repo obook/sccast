@@ -84,6 +84,9 @@ impl Menu {
                     Span::styled(if live { "● " } else { "" }, Style::new().fg(Color::Green)),
                     Span::styled(d.name.clone(), Style::new().fg(color).bold()),
                     Span::styled(format!("  {}", d.model), Style::new().fg(Color::DarkGray)),
+                    // Another sender's app (YouTube...): casting here would replace it.
+                    // Our own cast shows the dot instead.
+                    Span::styled(if live || d.busy.is_empty() { String::new() } else { format!("  ({})", d.busy) }, Style::new().fg(Color::Yellow)),
                 ]))
             })
             .collect();

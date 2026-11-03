@@ -51,6 +51,23 @@ impl Menu {
         });
     }
 
+    /// Read in a thread what `device` plays, so the menu goes on; Found::Checked brings the answer.
+    // ponytail: get_status has no timeout; a device that accepts the connection but never answers
+    // leaves "Checking..." until a key press cancels it.
+    fn check(&mut self, device: CastDevice) {
+        self.status = Status::Info(format!("Checking {}...", device.name));
+        self.checking = Some(device.id.clone());
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            // A device that does not answer: cast anyway, the launch reports the error.
+            let app = crate::device::running(&device).unwrap_or_else(|e| {
+                tracing::warn!("cannot read the status of {}: {e:#}", device.name);
+                None
+            });
+            let _ = tx.send(Found::Checked(device, app));
+        });
+    }
+
     /// Devices sorted by name, as listed.
     pub(super) fn list(&self) -> Vec<&CastDevice> {
         let mut list: Vec<_> = self.devices.values().collect();
@@ -80,6 +97,14 @@ impl Menu {
                     }
                     Found::Done if self.skip_done => self.skip_done = false,
                     Found::Done => self.scanning = false,
+                    Found::Checked(d, app) if self.checking.as_deref() == Some(d.id.as_str()) => {
+                        self.checking = None;
+                        let Some(app) = app else { return Ok(Action::Cast(d)) };
+                        self.status = Status::Error(format!("{} is playing {app}. Enter: replace it, another key: cancel", d.name));
+                        self.confirm = Some(d.id);
+                    }
+                    // Cancelled by a key press meanwhile.
+                    Found::Checked(..) => {}
                 }
             }
             while let Ok(status) = self.status_rx.try_recv() {
@@ -120,6 +145,10 @@ impl Menu {
                 continue;
             }
             tracing::info!(key = ?key.code, "key");
+            let confirm = self.confirm.take();
+            if self.checking.take().is_some() || confirm.is_some() {
+                self.status = Status::Info("Cast cancelled".into());
+            }
             let count = if self.on_settings { ROWS.len() } else { self.devices.len() };
             let state = if self.on_settings { &mut self.row } else { &mut self.device };
             match key.code {
@@ -147,7 +176,11 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
-                    return Ok(Action::Cast(device));
+                    // Our own cast restarts, a busy device confirmed: cast.
+                    if self.casting.as_deref() == Some(device.id.as_str()) || confirm.as_deref() == Some(device.id.as_str()) {
+                        return Ok(Action::Cast(device));
+                    }
+                    self.check(device);
                 }
                 _ => {}
             }

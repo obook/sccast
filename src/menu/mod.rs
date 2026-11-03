@@ -36,6 +36,8 @@ enum Found {
     /// A remembered device answered a ping: there, though its mDNS answer may not come through.
     Alive(String),
     Done,
+    /// Before a cast: the app another sender runs on this device, None when idle.
+    Checked(CastDevice, Option<String>),
 }
 
 /// What the user asked for.
@@ -100,6 +102,10 @@ pub struct Menu {
     chosen_stream: Option<cli::Stream>,
     /// When to restart the running cast with a new audio delay: 1 s after the last key press.
     recast_at: Option<Instant>,
+    /// Device whose status is being read before a cast. A key press cancels the cast.
+    checking: Option<String>,
+    /// Device found busy: Enter on it again replaces what it plays.
+    confirm: Option<String>,
 }
 
 impl Menu {
@@ -132,6 +138,8 @@ impl Menu {
             live: Live::default(),
             chosen_stream: None,
             recast_at: None,
+            checking: None,
+            confirm: None,
         }
     }
 

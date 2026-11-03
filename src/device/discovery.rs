@@ -21,13 +21,26 @@ pub struct CastDevice {
     pub model: String,
     pub ip: Ipv4Addr,
     pub port: u16,
+    /// App running on the device, from its mDNS announce: empty when idle or not announced.
+    /// Not saved in the devices file: it changes all the time.
+    pub busy: String,
+}
+
+/// What a device runs, from its TXT `st` (1: an app runs) and `rs` (that app's name).
+/// Some TVs leave `rs` empty: "busy" then.
+fn busy(st: &str, rs: &str) -> String {
+    match (st, rs) {
+        ("1", "") => "busy".into(),
+        ("1", app) => app.into(),
+        _ => String::new(),
+    }
 }
 
 impl CastDevice {
     fn from_service(info: &ResolvedService) -> Option<Self> {
         let txt = |key: &str| info.get_property_val_str(key).map(|v| v.trim().to_string()).unwrap_or_default();
         let ip = info.get_addresses_v4().into_iter().next()?;
-        Some(Self { id: txt("id"), name: txt("fn"), model: txt("md"), ip, port: info.get_port() })
+        Some(Self { id: txt("id"), name: txt("fn"), model: txt("md"), ip, port: info.get_port(), busy: busy(&txt("st"), &txt("rs")) })
     }
 
     /// One line of the devices file: id, name, model, ip, port, date of the last answer
@@ -44,7 +57,7 @@ impl CastDevice {
             cols => (cols, now),
         };
         let [id, name, model, ip, port]: [&str; 5] = cols.try_into().ok()?;
-        let device = Self { id: id.into(), name: name.into(), model: model.into(), ip: ip.parse().ok()?, port: port.parse().ok()? };
+        let device = Self { id: id.into(), name: name.into(), model: model.into(), ip: ip.parse().ok()?, port: port.parse().ok()?, busy: String::new() };
         Some((device, seen))
     }
 }
@@ -206,6 +219,7 @@ mod tests {
             model: "Chromecast".into(),
             ip: Ipv4Addr::LOCALHOST,
             port: 8009,
+            busy: String::new(),
         };
         assert!(is_named(&device, "télé salle 12"));
         assert!(is_named(&device, "abc123"));
@@ -213,10 +227,18 @@ mod tests {
     }
 
     #[test]
+    fn busy_only_when_an_app_runs() {
+        assert_eq!(busy("1", "YouTube"), "YouTube");
+        assert_eq!(busy("1", ""), "busy");
+        assert_eq!(busy("0", ""), "");
+        assert_eq!(busy("", "Backdrop"), "");
+    }
+
+    #[test]
     fn forgets_devices_silent_for_three_weeks() {
         const DAY: u64 = 24 * 3600;
         let now = 1_800_000_000;
-        let device = CastDevice { id: "abc123".into(), name: "TÉLÉ Salle 12".into(), model: "Chromecast".into(), ip: Ipv4Addr::new(10, 0, 0, 7), port: 8009 };
+        let device = CastDevice { id: "abc123".into(), name: "TÉLÉ Salle 12".into(), model: "Chromecast".into(), ip: Ipv4Addr::new(10, 0, 0, 7), port: 8009, busy: String::new() };
         let line = device.to_line(now - 20 * DAY);
         let old = CastDevice { id: "old".into(), ..device.clone() }.to_line(now - 21 * DAY);
         let before_dates = "five\tSalon\tChromecast\t10.0.0.8\t8009";
@@ -229,7 +251,7 @@ mod tests {
     #[test]
     fn rewrites_a_date_once_a_day_and_any_change_at_once() {
         let now = 1_800_000_000;
-        let device = CastDevice { id: "abc123".into(), name: "Salon".into(), model: "Chromecast".into(), ip: Ipv4Addr::new(10, 0, 0, 7), port: 8009 };
+        let device = CastDevice { id: "abc123".into(), name: "Salon".into(), model: "Chromecast".into(), ip: Ipv4Addr::new(10, 0, 0, 7), port: 8009, busy: String::new() };
         let mut memory = Memory::new();
         assert!(update(&mut memory, &device, now));
         assert!(!update(&mut memory, &device, now + 3600));
@@ -240,7 +262,7 @@ mod tests {
 
     #[test]
     fn ping_finds_only_hosts_that_answer() {
-        let at = |id: &str, ip| CastDevice { id: id.into(), name: String::new(), model: String::new(), ip, port: 8009 };
+        let at = |id: &str, ip| CastDevice { id: id.into(), name: String::new(), model: String::new(), ip, port: 8009, busy: String::new() };
         // 192.0.2.1: TEST-NET-1, never routed.
         let devices = [at("here", Ipv4Addr::LOCALHOST), at("nowhere", Ipv4Addr::new(192, 0, 2, 1))];
         assert_eq!(ping_all(&devices), vec!["here".to_string()]);
