@@ -25,6 +25,8 @@ about 3 seconds of delay, about 5 if sccast falls back to Google's receiver.
 - A Rust toolchain (`cargo`) 1.92 or newer, only to build from source.
 - The PC and the TV (Chromecast built-in or a Chromecast device) on the
   same local network, with mDNS (UDP 5353) allowed between them.
+- `kdialog`, for the tray's questions and notifications; the `.deb`
+  recommends it.
 
 ## Install
 
@@ -110,9 +112,9 @@ then open a menu: the devices appear as they answer, and the command line
 options prefill the settings. Arrows move and change, Tab switches columns,
 Enter casts, or casts again with the new settings. The menu stays during the
 cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
-chooses another screen, `f` freezes the TV's image with "Freeze" in a corner
-(`f` again goes live; a new cast starts live), `q` or Ctrl+C quits and frees
-the TV. Closing the
+chooses another screen, `f` freezes the TV's image, with a small "Freeze" on
+a gray box in the top-right corner (`f` again goes live; a new cast starts
+live), `q` or Ctrl+C quits and frees the TV. Closing the
 terminal frees it too. In HLS, the receiver stays open on the TV between two
 casts to the same TV.
 
@@ -121,18 +123,6 @@ people go to stderr, and stdout gets one line per change of state,
 `state casting`, `state buffering`, `state reconnecting`, then
 `state stopped` or `state error` at the end. SIGTERM stops the cast and
 frees the TV.
-
-`sccast tray` puts an icon in the desktop's notification area; the `.deb`
-starts it with every session (System Settings > Autostart turns that off).
-Its menu lists the devices and casts to the one clicked. A device that plays
-another sender's app asks before sccast replaces it. During a cast, the menu
-also stops, freezes and chooses another screen; it always sets the preset and
-opens the terminal menu. A red dot marks a running cast; errors show as
-notifications. The screen dialog comes back at each cast: the screen is
-shared only while a cast runs. The receiver stays open between casts as in the
-menu. `tray` takes the options of `cast` except `--device`, `--url` and
-`--file`. Its log is `$XDG_RUNTIME_DIR/sccast-tray.log`. The questions and the
-notifications use `kdialog`.
 
 `cast` opens the screen picker, then starts the TV. In HLS it first waits
 about 6 seconds for the stream to fill. Ctrl+C stops the TV at once.
@@ -151,9 +141,27 @@ problem. VLC stutters on this live stream and is not a reliable check.
 | `--format mirror` | `mirror` | Google's screen mirroring, H.264 and Opus over RTP, about 0.15 s of delay. HLS on a device without it |
 | `--format hls` | | 1-second HLS segments, about 3 s of delay. `serve`, `--url` and `--file` always use it |
 | `--format mkv` | | One continuous Matroska stream instead of HLS segments (experimental, about 5 to 6 s of delay) |
-| `--audio-delay MS` | `0` | Delays the sound on the TV, or the image when negative (`cast` only). Changed in the menu during a cast, it restarts the cast |
+| `--audio-delay MS` | `0` | Delays the sound on the TV, or the image when negative (`cast` and `tray`). Changed in the menu during a cast, it restarts the cast |
 | `--url URL` | | Plays a media URL instead of the screen (`cast` only) |
 | `--file PATH` | | Plays a local MP4 file instead of the screen (`cast` only) |
+
+## Tray
+
+`sccast tray` puts an icon in the desktop's notification area. The `.deb`
+starts it with each session; turn that off in System Settings > Autostart.
+
+Its menu lists the devices; click one to cast to it. If the device plays
+another sender's app, sccast asks in a box before replacing it. The menu
+also sets the preset and opens the terminal menu; during a cast, it stops,
+freezes and chooses another screen. Freeze waits half a second for the menu
+to close, so the frozen image does not show it. The receiver stays open
+between casts, as in the terminal menu.
+
+A red dot on the icon marks a running cast; errors show as notifications.
+The screen dialog comes back at each cast: sccast shares the screen only
+while a cast runs.
+
+The tray takes the options of `cast` except `--device`, `--url` and `--file`.
 
 ## Receiver (HLS)
 
@@ -215,8 +223,12 @@ and plug it back in.
 The first launch on a Chromecast can fail after about a minute: the menu
 tries again by itself, the next launch takes a few seconds.
 
+No tray icon: look behind the arrow of the notification area. On GNOME, the
+icon needs the AppIndicator extension.
+
 Logs: `RUST_LOG=sccast=debug sccast cast`. The menu always writes its log to
-`$XDG_RUNTIME_DIR/sccast.log`, emptied at each start.
+`$XDG_RUNTIME_DIR/sccast.log`, and the tray to `sccast-tray.log` in the same
+directory, both emptied at each start.
 
 ## Limitations
 
