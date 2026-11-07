@@ -84,6 +84,19 @@ To do:
 - [ ] Tune the alert thresholds on the school network
 - [ ] Check the launch retry on a cold Chromecast (just plugged in)
 
+## Tray
+
+Done:
+
+- [x] `sccast tray`: icon in the notification area, started with the session (.deb). Devices, stop, freeze, screen, presets, terminal menu
+- [x] A busy device asks before sccast replaces it; errors as KDE notifications (kdialog)
+- [x] The screen is shared only during a cast; the receiver stays open between casts as in the menu
+
+To do:
+
+- [ ] Cast from the tray to the school's Chromecast and the Sharp TV
+- [ ] GNOME: the icon needs the AppIndicator extension, and kdialog is a KDE tool
+
 ## Windows (not started)
 
 Discovery, Cast control, the HTTP server, the menu, the mirror sender and

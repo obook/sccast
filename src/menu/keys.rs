@@ -54,7 +54,7 @@ impl Menu {
     /// Read in a thread what `device` plays, so the menu goes on; Found::Checked brings the answer.
     // ponytail: get_status has no timeout; a device that accepts the connection but never answers
     // leaves "Checking..." until a key press cancels it.
-    fn check(&mut self, device: CastDevice) {
+    pub fn check(&mut self, device: CastDevice) {
         self.status = Status::Info(format!("Checking {}...", device.name));
         self.checking = Some(device.id.clone());
         let tx = self.tx.clone();
@@ -75,61 +75,77 @@ impl Menu {
         list
     }
 
+    /// Take in what the browse and cast threads sent. Returns the cast to start: a device
+    /// found idle after its check, or the running cast again (new screen, new audio delay).
+    /// A device found playing another sender's app comes back as Busy.
+    pub fn poll(&mut self, s: &mut Settings) -> Option<Action> {
+        while let Ok(found) = self.rx.try_recv() {
+            match found {
+                // Keyed by id: a device answers several times.
+                Found::Device(d) => {
+                    self.answered.insert(d.id.clone());
+                    discovery::seen(&d);
+                    self.devices.insert(d.id.clone(), d);
+                }
+                Found::Alive(id) => {
+                    if let Some(d) = self.devices.get(&id) {
+                        discovery::seen(d);
+                    }
+                    self.answered.insert(id);
+                }
+                Found::Done if self.skip_done => self.skip_done = false,
+                Found::Done => self.scanning = false,
+                Found::Checked(d, app) if self.checking.as_deref() == Some(d.id.as_str()) => {
+                    self.checking = None;
+                    return Some(match app {
+                        Some(app) => Action::Busy(d, app),
+                        None => Action::Cast(d),
+                    });
+                }
+                // Cancelled by a key press meanwhile.
+                Found::Checked(..) => {}
+            }
+        }
+        while let Ok(status) = self.status_rx.try_recv() {
+            if let Status::Stream(stream) = status {
+                self.device_stream(s, stream);
+                continue;
+            }
+            // A device gone from the list since (rescan): Enter recasts by hand.
+            if let Status::ScreenPicked = status {
+                if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
+                    return Some(Action::Cast(device.clone()));
+                }
+                continue;
+            }
+            self.set_status(status);
+        }
+        if self.recast_at.is_some_and(|at| Instant::now() >= at) {
+            self.recast_at = None;
+            if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
+                tracing::info!(ms = s.audio_delay, "audio delay changed: restarting the cast");
+                return Some(Action::Cast(device.clone()));
+            }
+        }
+        if self.live.started.is_some() {
+            self.live.sample();
+        }
+        None
+    }
+
     /// Draw and handle keys until the user asks for something. `quit` is set by SIGTERM.
     pub fn next(&mut self, terminal: &mut DefaultTerminal, s: &mut Settings, quit: &AtomicBool) -> anyhow::Result<Action> {
         loop {
             if quit.load(Ordering::SeqCst) {
                 return Ok(Action::Quit);
             }
-            while let Ok(found) = self.rx.try_recv() {
-                match found {
-                    // Keyed by id: a device answers several times.
-                    Found::Device(d) => {
-                        self.answered.insert(d.id.clone());
-                        discovery::seen(&d);
-                        self.devices.insert(d.id.clone(), d);
-                    }
-                    Found::Alive(id) => {
-                        if let Some(d) = self.devices.get(&id) {
-                            discovery::seen(d);
-                        }
-                        self.answered.insert(id);
-                    }
-                    Found::Done if self.skip_done => self.skip_done = false,
-                    Found::Done => self.scanning = false,
-                    Found::Checked(d, app) if self.checking.as_deref() == Some(d.id.as_str()) => {
-                        self.checking = None;
-                        let Some(app) = app else { return Ok(Action::Cast(d)) };
-                        self.status = Status::Error(format!("{} is playing {app}. Enter: replace it, another key: cancel", d.name));
-                        self.confirm = Some(d.id);
-                    }
-                    // Cancelled by a key press meanwhile.
-                    Found::Checked(..) => {}
+            match self.poll(s) {
+                Some(Action::Busy(d, app)) => {
+                    self.status = Status::Error(format!("{} is playing {app}. Enter: replace it, another key: cancel", d.name));
+                    self.confirm = Some(d.id);
                 }
-            }
-            while let Ok(status) = self.status_rx.try_recv() {
-                if let Status::Stream(stream) = status {
-                    self.device_stream(s, stream);
-                    continue;
-                }
-                // A device gone from the list since (rescan): Enter recasts by hand.
-                if let Status::ScreenPicked = status {
-                    if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
-                        return Ok(Action::Cast(device.clone()));
-                    }
-                    continue;
-                }
-                self.set_status(status);
-            }
-            if self.recast_at.is_some_and(|at| Instant::now() >= at) {
-                self.recast_at = None;
-                if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
-                    tracing::info!(ms = s.audio_delay, "audio delay changed: restarting the cast");
-                    return Ok(Action::Cast(device.clone()));
-                }
-            }
-            if self.live.started.is_some() {
-                self.live.sample();
+                Some(action) => return Ok(action),
+                None => {}
             }
             terminal.draw(|f| self.draw(f, s))?;
             self.tick += 1;

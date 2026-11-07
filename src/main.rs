@@ -2,7 +2,7 @@
 //! sccast: cast the screen and sound of a Linux Wayland desktop to a Chromecast.
 //! This file sets up the log, reads the command line and runs the command:
 //!   capture/ (PC side), device/ (TV side), hls/ and mirror/ (the two transports),
-//!   menu/ (terminal interface), session/ (how a cast runs).
+//!   menu/ (terminal interface), tray/ (icon in the notification area), session/ (how a cast runs).
 //!
 //! Author: O. Booklage
 //! Date: October 2026
@@ -15,6 +15,7 @@ mod hls;
 mod menu;
 mod mirror;
 mod session;
+mod tray;
 
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::Ordering;
@@ -29,9 +30,9 @@ use tracing_subscriber::EnvFilter;
 /// Set while the menu runs: logs go to this file, opened once.
 static MENU_LOG: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
 
-/// Menu log, on the per-user tmpfs (private, cleared at logout).
-fn log_path() -> std::path::PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into).join("sccast.log")
+/// File `name` on the per-user tmpfs (private, cleared at logout): the logs of the menu and the tray.
+fn runtime_file(name: &str) -> std::path::PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into).join(name)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -105,6 +106,9 @@ fn main() -> anyhow::Result<()> {
             let result = capture::ScreenCast::open().and_then(|screen| session::cast_screen(&device, &settings, &screen, stop, None, &out));
             out.state(if result.is_ok() { "stopped" } else { "error" });
             result
+        }
+        Command::Tray { audio_delay, receiver, latency, stream } => {
+            session::run_tray(menu::Settings { stream, audio_delay, latency, receiver })
         }
         Command::Stop { device, receiver: app_id } => {
             let device = pick_device(device.as_deref())?;

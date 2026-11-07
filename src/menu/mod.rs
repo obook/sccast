@@ -29,6 +29,7 @@ use crate::cli;
 use crate::device::CastDevice;
 use live::Live;
 pub use settings::Settings;
+pub(crate) use settings::{preset, PRESETS};
 use settings::{change, AUDIO_DELAY_ROW};
 
 enum Found {
@@ -49,6 +50,9 @@ pub enum Action {
     /// Choose the screen again in the portal dialog.
     PickScreen,
     Quit,
+    /// From poll() only: the device plays this app of another sender. The menu asks before
+    /// replacing it, the tray in a dialog.
+    Busy(CastDevice, String),
 }
 
 /// Progress of the running cast, sent by its thread.
@@ -213,6 +217,31 @@ impl Menu {
             crate::capture::FREEZE.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         self.casting = id;
+    }
+
+    /// Devices as listed, each with whether it answered since the last scan.
+    pub fn devices(&self) -> Vec<(CastDevice, bool)> {
+        self.list().into_iter().map(|d| (d.clone(), self.answered.contains(&d.id))).collect()
+    }
+
+    /// Id of the device being cast to.
+    pub fn casting(&self) -> Option<&str> {
+        self.casting.as_deref()
+    }
+
+    /// The status line, and whether it is an error. None once a cast has ended.
+    pub fn status_line(&self) -> Option<(&str, bool)> {
+        match &self.status {
+            Status::Info(m) => Some((m, false)),
+            Status::Error(m) => Some((m, true)),
+            _ => None,
+        }
+    }
+
+    /// Preset `i` of PRESETS, chosen by hand: the user's choice from now on, as in the menu.
+    pub fn set_preset(&mut self, s: &mut Settings, i: usize) {
+        self.chosen_stream = None;
+        (_, s.stream.resolution, s.stream.bitrate) = PRESETS[i];
     }
 
     /// Redraw before a blocking step (portal dialog, stopping).

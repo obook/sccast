@@ -23,7 +23,7 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // Ctrl+C is a key in the menu; the flag still catches SIGTERM.
     let quit = stop_flag()?;
     // A fresh log for each run, open before the portal so its answer is logged too.
-    if let Ok(file) = std::fs::File::create(crate::log_path()) {
+    if let Ok(file) = std::fs::File::create(crate::runtime_file("sccast.log")) {
         let _ = crate::MENU_LOG.set(file);
     }
     // The screen first, before the menu takes the terminal.
@@ -37,7 +37,7 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // Not restore(): its eprintln! panics when the terminal was closed.
     let _ = ratatui::try_restore();
     run.unwrap_or_else(|panic| {
-        let _ = writeln!(std::io::stderr(), "sccast stopped on an internal error: see {}", crate::log_path().display());
+        let _ = writeln!(std::io::stderr(), "sccast stopped on an internal error: see {}", crate::runtime_file("sccast.log").display());
         std::panic::resume_unwind(panic)
     })
 }
@@ -53,12 +53,7 @@ fn drive_menu(
         menu.set_status(menu::Status::Info(note));
     }
     // Chosen before the menu, kept for every cast; p replaces it.
-    let screen = Arc::new(Mutex::new(Arc::new(screen)));
-    // Stop and keep flags of the running cast, and its thread.
-    let mut running: Option<(&'static AtomicBool, &'static AtomicBool, JoinHandle<()>)> = None;
-    // TV where the receiver may be open, and its app id. Shared with close_on_signal.
-    let tv: Arc<Mutex<Option<(CastDevice, String)>>> = Arc::default();
-    close_on_signal(&tv, quit);
+    let mut casts = Casts::new(Some(screen), quit);
     // Error of a terminal closed without quitting: returned once the TV is freed.
     let mut lost = None;
     loop {
@@ -72,18 +67,52 @@ fn drive_menu(
         };
         tracing::info!(?action, "menu action");
         if let menu::Action::PickScreen = action {
-            pick_screen(&menu, &screen);
+            pick_screen(Out::Menu(menu.current_sender()), &casts.screen);
             continue;
         }
+        // The terminal may be closed: freeing the TV comes first, the redraw may fail.
+        casts.act(&action, &mut menu, s, &mut |menu, s| drop(menu.draw_now(terminal, s)));
+        if let menu::Action::Quit = action {
+            return lost.map_or(Ok(()), Err);
+        }
+    }
+}
+
+/// The running cast and the TV where its receiver may stay open: shared by the menu and the tray.
+pub(super) struct Casts {
+    /// Screen of the casts. The menu chooses it before it starts; the tray at each cast.
+    pub screen: Arc<Mutex<Option<Arc<ScreenCast>>>>,
+    /// Stop and keep flags of the running cast, and its thread.
+    running: Option<(&'static AtomicBool, &'static AtomicBool, JoinHandle<()>)>,
+    /// TV where the receiver may be open, and its app id. Shared with close_on_signal.
+    tv: Arc<Mutex<Option<(CastDevice, String)>>>,
+    quit: &'static AtomicBool,
+}
+
+impl Casts {
+    pub(super) fn new(screen: Option<ScreenCast>, quit: &'static AtomicBool) -> Self {
+        let tv = Arc::default();
+        close_on_signal(&tv, quit);
+        Self { screen: Arc::new(Mutex::new(screen.map(Arc::new))), running: None, tv, quit }
+    }
+
+    /// Stop the running cast and close the receiver, unless `action` keeps it open, then start
+    /// the cast of a Cast action. `show` redraws before a step that blocks.
+    pub(super) fn act(
+        &mut self,
+        action: &menu::Action,
+        menu: &mut menu::Menu,
+        s: &mut menu::Settings,
+        show: &mut dyn FnMut(&mut menu::Menu, &menu::Settings),
+    ) {
         // The receiver stays open on the TV between casts to the same TV, and after s:
         // the Sharp TV sometimes never answered a launch right after a close.
         let same_tv =
-            matches!((&action, &*tv.lock().unwrap()), (menu::Action::Cast(d), Some((open, _))) if d.id == open.id);
+            matches!((action, &*self.tv.lock().unwrap()), (menu::Action::Cast(d), Some((open, _))) if d.id == open.id);
         let keep_open = same_tv || matches!(action, menu::Action::Stop);
-        if let Some((stop, keep, cast)) = running.take() {
+        if let Some((stop, keep, cast)) = self.running.take() {
             menu.set_status(menu::Status::Info("Stopping...".into()));
-            // The terminal may be closed: freeing the TV comes first.
-            let _ = menu.draw_now(terminal, s);
+            show(menu, s);
             keep.store(keep_open, Ordering::SeqCst);
             stop.store(true, Ordering::SeqCst);
             let started = Instant::now();
@@ -92,41 +121,59 @@ fn drive_menu(
             menu.set_status(menu::Status::Ended);
         } else if !keep_open {
             // A receiver left open by s, on this TV or another one.
-            let open = tv.lock().unwrap().take();
+            let open = self.tv.lock().unwrap().take();
             if let Some((device, app_id)) = open {
                 menu.set_status(menu::Status::Info(format!("Closing the receiver on {}...", device.name)));
-                let _ = menu.draw_now(terminal, s);
+                show(menu, s);
                 wait_for(&std::thread::spawn(move || drop(device::stop(&device, &app_id, None))));
             }
         }
         if !keep_open {
-            *tv.lock().unwrap() = None;
+            *self.tv.lock().unwrap() = None;
         }
-        let device = match action {
-            menu::Action::Quit => return lost.map_or(Ok(()), Err),
-            menu::Action::Stop | menu::Action::PickScreen => continue,
-            menu::Action::Cast(device) => device,
-        };
+        let menu::Action::Cast(device) = action else { return };
+        let device = device.clone();
         // ponytail: two leaked flags per cast (a few bytes), play() wants 'static flags.
         let stop: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
         let keep: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
-        stop_on_signal(stop, keep, quit);
+        stop_on_signal(stop, keep, self.quit);
         let out = Out::Menu(menu.status_sender());
         menu.restore_stream(s);
         let settings = s.clone();
-        let screen = Arc::clone(&screen.lock().unwrap());
+        let slot = Arc::clone(&self.screen);
         menu.set_casting(Some(device.id.clone()));
         // The mirror format closes its own app: nothing left open to track.
         let tracked = settings.stream.format != cli::Format::Mirror;
-        *tv.lock().unwrap() = tracked.then(|| (device.clone(), settings.receiver.clone()));
+        *self.tv.lock().unwrap() = tracked.then(|| (device.clone(), settings.receiver.clone()));
         let cast = std::thread::spawn(move || {
+            let opened = slot.lock().unwrap().clone();
+            let screen = match opened {
+                Some(screen) => screen,
+                // The tray: the screen dialog comes at each cast.
+                None => {
+                    out.say("Choose the screen in the dialog...");
+                    match ScreenCast::open() {
+                        // Stopped during the dialog: the screen closes here instead of staying shared.
+                        Ok(_) if stop.load(Ordering::SeqCst) => return,
+                        Ok(screen) => {
+                            if let Some(note) = screen.note() {
+                                out.say(&note);
+                            }
+                            let screen = Arc::new(screen);
+                            *slot.lock().unwrap() = Some(Arc::clone(&screen));
+                            screen
+                        }
+                        Err(e) => return out.send(menu::Status::Error(format!("No screen: {e:#}"))),
+                    }
+                }
+            };
             let result = cast_screen(&device, &settings, &screen, stop, Some(keep), &out);
             tracing::info!(ok = result.is_ok(), "cast thread: cast ended");
             match result {
                 Ok(()) => out.send(menu::Status::Ended),
                 // The sharing may have been stopped from the desktop.
                 Err(e) if format!("{e:#}").contains("capture") => {
-                    out.send(menu::Status::Error(format!("{e:#} (p: choose the screen again)")))
+                    out.send(menu::Status::Error(format!("{e:#} (choose the screen again)")))
                 }
                 Err(e) => out.send(menu::Status::Error(format!("{e:#}"))),
             }
@@ -134,7 +181,15 @@ fn drive_menu(
             drop(screen);
             tracing::info!("cast thread: done");
         });
-        running = Some((stop, keep, cast));
+        self.running = Some((stop, keep, cast));
+    }
+
+    /// The tray: once no cast runs, let the screen go, so the desktop stops sharing it.
+    pub(super) fn release_screen(&self) {
+        if self.running.as_ref().is_none_or(|(_, _, cast)| cast.is_finished()) {
+            // The last copy: dropping it closes the portal session.
+            *self.screen.lock().unwrap() = None;
+        }
     }
 }
 
@@ -172,15 +227,14 @@ fn close_on_signal(tv: &Arc<Mutex<Option<(CastDevice, String)>>>, quit: &'static
 }
 
 /// Open the portal dialog in a thread: the menu keeps answering, the cast goes on meanwhile.
-fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>) {
-    let out = Out::Menu(menu.current_sender());
+pub(super) fn pick_screen(out: Out, screen: &Arc<Mutex<Option<Arc<ScreenCast>>>>) {
     let slot = Arc::clone(screen);
     std::thread::spawn(move || {
         out.say("Choose the screen in the dialog...");
         match ScreenCast::open() {
             Ok(opened) => {
                 let said = opened.note().unwrap_or_else(|| "Screen changed.".to_string());
-                *slot.lock().unwrap() = Arc::new(opened);
+                *slot.lock().unwrap() = Some(Arc::new(opened));
                 out.say(&said);
                 out.send(menu::Status::ScreenPicked);
             }

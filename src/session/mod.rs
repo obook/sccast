@@ -1,7 +1,8 @@
 //! session/
 //! How one cast runs, from the capture to the TV, and where its progress goes (the terminal
-//! or the menu). menu_loop.rs runs the casts started from the menu; terminal.rs holds the
-//! terminal helpers (spinner, device choice, Ctrl+C); out.rs sends the progress.
+//! or the menu). menu_loop.rs runs the casts started from the menu, and from the tray icon
+//! for tray_loop.rs; terminal.rs holds the terminal helpers (spinner, device choice, Ctrl+C);
+//! out.rs sends the progress.
 //!
 //! Author: O. Booklage
 //! Date: October 2026
@@ -10,6 +11,7 @@
 mod menu_loop;
 mod out;
 mod terminal;
+mod tray_loop;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -22,6 +24,7 @@ use crate::{cli, hls, menu, mirror};
 pub use menu_loop::run_menu;
 pub use out::Out;
 pub use terminal::{pick_device, spin, stop_flag, SEARCHING};
+pub use tray_loop::run_tray;
 
 /// Never set: outside the menu, stopping always closes the receiver app.
 pub static NO_KEEP: AtomicBool = AtomicBool::new(false);

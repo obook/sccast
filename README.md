@@ -100,6 +100,7 @@ sccast cast --device "Kitchen" --resolution 1280x720
 sccast cast --device "Kitchen" --file movie.mp4
 sccast stop --device "Kitchen"               # close a cast left running
 sccast serve                                 # local stream, no TV
+sccast tray                                  # icon in the notification area
 ```
 
 ![The sccast menu during a cast](media/menu.png)
@@ -120,6 +121,18 @@ people go to stderr, and stdout gets one line per change of state,
 `state casting`, `state buffering`, `state reconnecting`, then
 `state stopped` or `state error` at the end. SIGTERM stops the cast and
 frees the TV.
+
+`sccast tray` puts an icon in the desktop's notification area; the `.deb`
+starts it with every session (System Settings > Autostart turns that off).
+Its menu lists the devices and casts to the one clicked. A device that plays
+another sender's app asks before sccast replaces it. During a cast, the menu
+also stops, freezes and chooses another screen; it always sets the preset and
+opens the terminal menu. A red dot marks a running cast; errors show as
+notifications. The screen dialog comes back at each cast: the screen is
+shared only while a cast runs. The receiver stays open between casts as in the
+menu. `tray` takes the options of `cast` except `--device`, `--url` and
+`--file`. Its log is `$XDG_RUNTIME_DIR/sccast-tray.log`. The questions and the
+notifications use `kdialog`.
 
 `cast` opens the screen picker, then starts the TV. In HLS it first waits
 about 6 seconds for the stream to fill. Ctrl+C stops the TV at once.
