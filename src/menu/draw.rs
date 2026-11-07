@@ -139,7 +139,10 @@ impl Menu {
     fn draw_keys(&self, f: &mut Frame, area: ratatui::layout::Rect) {
         let mut keys = vec![("↑↓", "move"), ("←→", "change"), ("Tab", "switch"), ("r", "rescan"), ("p", "screen"), ("Enter", "cast")];
         if self.casting.is_some() {
-            keys.push(("s", "stop"));
+            // r still works: its place goes to f, the list refreshes by itself anyway.
+            keys.retain(|(key, _)| *key != "r");
+            let frozen = crate::capture::FREEZE.load(std::sync::atomic::Ordering::SeqCst);
+            keys.extend([("s", "stop"), ("f", if frozen { "live" } else { "freeze" })]);
         }
         keys.push(("q", "quit"));
         let help: Vec<Span> = keys

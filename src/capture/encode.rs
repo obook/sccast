@@ -65,6 +65,7 @@ pub fn describe(screen: Option<&ScreenCast>, stream: &Stream) -> String {
 /// latest keyframe (as GNOME Network Displays does); the HTTP server relays it to the TV.
 /// Mirror: one access unit per buffer, SPS/PPS before each key frame (the receiver can start on
 /// any). Key frames every 5 s only: the receiver asks for one when it loses a frame.
+/// The overlay writes "Freeze" while the image is frozen (`f` in the menu), silent otherwise.
 fn video_encode(stream: &Stream) -> String {
     let Stream { resolution: (width, height), fps, bitrate, format, .. } = stream;
     let (key_interval, sink) = match format {
@@ -83,6 +84,8 @@ fn video_encode(stream: &Stream) -> String {
     };
     format!(
         "video/x-raw,format=I420,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1 \
+         ! textoverlay name=freeze text=Freeze silent=true valignment=top halignment=right \
+           shaded-background=true font-desc=\"Sans Bold 24\" \
          ! x264enc name=venc tune=zerolatency speed-preset=veryfast key-int-max={key_interval} bitrate={bitrate} \
          ! video/x-h264,profile=high \
          ! {sink}"

@@ -136,6 +136,8 @@ fn draws_and_applies_presets() {
     let text = screen.concat();
     assert!(text.contains("Living Room TV") && text.contains("Entry-level TV") && text.contains("Mirror"));
     assert!(text.contains("00:12:34") && text.contains("Bitrate"));
+    // The key help fits in 80 columns during a cast.
+    assert!(text.contains("s stop") && text.contains("f freeze") && text.contains("q quit"));
 
     // SCCAST_SCREENSHOT=file.html cargo test draws: the same screen as a colored page, for media/.
     if let Ok(path) = std::env::var("SCCAST_SCREENSHOT") {

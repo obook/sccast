@@ -49,7 +49,7 @@ Debian, Ubuntu and derivatives (tested on KDE neon 24.04):
 ```sh
 sudo apt install pkg-config libgstreamer1.0-dev gstreamer1.0-tools \
   gstreamer1.0-plugins-{base,good,bad,ugly} gstreamer1.0-libav \
-  gstreamer1.0-pipewire
+  gstreamer1.0-pipewire gstreamer1.0-x
 ```
 
 Fedora (not tested; `x264enc` comes from RPM Fusion):
@@ -69,7 +69,7 @@ sudo pacman -S pkgconf gstreamer gst-plugins-{base,good,bad,ugly} gst-libav \
 Check the GStreamer elements, then build:
 
 ```sh
-gst-inspect-1.0 pipewiresrc pulsesrc x264enc hlssink2 avenc_aac opusenc appsink > /dev/null
+gst-inspect-1.0 pipewiresrc pulsesrc x264enc hlssink2 avenc_aac opusenc appsink textoverlay > /dev/null
 cargo build --release
 ```
 
@@ -109,7 +109,9 @@ then open a menu: the devices appear as they answer, and the command line
 options prefill the settings. Arrows move and change, Tab switches columns,
 Enter casts, or casts again with the new settings. The menu stays during the
 cast with its state, duration, buffering, CPU and bitrate. `s` stops, `p`
-chooses another screen, `q` or Ctrl+C quits and frees the TV. Closing the
+chooses another screen, `f` freezes the TV's image with "Freeze" in a corner
+(`f` again goes live; a new cast starts live), `q` or Ctrl+C quits and frees
+the TV. Closing the
 terminal frees it too. In HLS, the receiver stays open on the TV between two
 casts to the same TV.
 
