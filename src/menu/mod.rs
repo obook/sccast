@@ -210,6 +210,7 @@ impl Menu {
     pub fn set_casting(&mut self, id: Option<String>) {
         if id.is_some() {
             self.live = Live::starting();
+            crate::capture::FREEZE.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         self.casting = id;
     }

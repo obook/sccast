@@ -157,6 +157,11 @@ impl Menu {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(Action::Quit),
                 KeyCode::Char('s') if self.casting.is_some() => return Ok(Action::Stop),
                 KeyCode::Char('p') => return Ok(Action::PickScreen),
+                KeyCode::Char('f') if self.casting.is_some() => {
+                    let frozen = !crate::capture::FREEZE.fetch_xor(true, Ordering::SeqCst);
+                    let said = if frozen { "Frozen: the TV keeps this image (f: live again)" } else { "Live again" };
+                    self.status = Status::Info(said.into());
+                }
                 KeyCode::Up | KeyCode::Char('k') if count > 0 => {
                     state.select(Some(state.selected().unwrap_or(0).checked_sub(1).unwrap_or(count - 1)));
                 }
