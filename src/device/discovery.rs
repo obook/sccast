@@ -14,7 +14,7 @@ use mdns_sd::{RecvTimeoutError, ResolvedService, ServiceDaemon, ServiceEvent};
 
 const SERVICE_TYPE: &str = "_googlecast._tcp.local.";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CastDevice {
     pub id: String,
     pub name: String,

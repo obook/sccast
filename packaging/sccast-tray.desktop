@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=sccast
+GenericName=Cast to a Chromecast
+Comment=Cast the screen to a Chromecast from the notification area
+Exec=sccast tray
+Icon=sccast
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=cast;screen;chromecast;tv;

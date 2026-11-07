@@ -35,6 +35,8 @@ tokio-util = { version = "0.7.20", features = ["io"] }
 tower-http = { version = "0.7.1", features = ["fs", "cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The icon in the desktop's notification area (src/tray/); zbus is already pulled by ashpd.
+ksni = { version = "0.3.7", features = ["blocking"] }
 
 # cargo-deb, used by packaging/build-deb.sh. $auto adds the shared libraries (libgstreamer, libc);
 # the GStreamer plugins are loaded at run time, so they are listed by hand.
@@ -42,11 +44,16 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 maintainer = "Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"
 section = "video"
 depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-pipewire, gstreamer1.0-x, xdg-desktop-portal"
-recommends = "pipewire-pulse"
+# kdialog: the tray's questions and notifications.
+recommends = "pipewire-pulse, kdialog"
 extended-description = "sccast casts the screen and sound of a Wayland desktop to a Chromecast or a device with Chromecast built-in, as a live HLS stream."
 assets = [
     ["target/release/sccast", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/sccast/", "644"],
+    ["media/icon.svg", "usr/share/icons/hicolor/scalable/apps/sccast.svg", "644"],
+    # The tray: in the application menu, and started with every session.
+    ["packaging/sccast-tray.desktop", "usr/share/applications/", "644"],
+    ["packaging/sccast-tray.desktop", "etc/xdg/autostart/", "644"],
 ]
 
 # rust_cast 0.21.0 with one patch in src/lib.rs (NoCertificateVerification): accept the

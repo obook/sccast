@@ -1,5 +1,5 @@
 //! cli.rs
-//! Command line options (clap): the commands list, cast, stop and serve, and the stream
+//! Command line options (clap): the commands list, cast, tray, stop and serve, and the stream
 //! settings they share. The menu starts from these values.
 //!
 //! Author: O. Booklage
@@ -52,6 +52,21 @@ pub enum Command {
         receiver: String,
         /// Seconds sccast's receiver stays behind live. At 1 s the Sharp buffered as soon as the
         /// PC was in use (2026-10-21); 1.5 s did not.
+        #[arg(long, default_value_t = 1.5)]
+        latency: f64,
+        #[command(flatten)]
+        stream: Stream,
+    },
+    /// Stay in the desktop's notification area: cast from its menu.
+    Tray {
+        /// Delay the sound by this many milliseconds, if it comes before the image on the TV.
+        /// Negative: delay the image instead.
+        #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
+        audio_delay: i64,
+        /// Receiver app id, as for cast.
+        #[arg(long, default_value = crate::device::SCCAST_RECEIVER)]
+        receiver: String,
+        /// Seconds sccast's receiver stays behind live, as for cast.
         #[arg(long, default_value_t = 1.5)]
         latency: f64,
         #[command(flatten)]
