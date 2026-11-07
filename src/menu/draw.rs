@@ -47,6 +47,10 @@ impl Menu {
             Span::styled("screen & sound to Chromecast", Style::new().fg(Color::Gray).italic()),
         ]);
         let (text, color) = match &self.status {
+            // While frozen: light blue, like ice, and used nowhere else in the menu.
+            Status::Info(m) if self.casting.is_some() && crate::capture::FREEZE.load(std::sync::atomic::Ordering::SeqCst) => {
+                (m.as_str(), Color::LightBlue)
+            }
             Status::Info(m) => (m.as_str(), if self.casting.is_some() { Color::Green } else { Color::Yellow }),
             Status::Error(m) => (m.as_str(), Color::Red),
             // Stats never become the status line (see set_status).
