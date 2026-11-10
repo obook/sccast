@@ -44,6 +44,16 @@ pub struct View {
     pub status: String,
 }
 
+// Menu icons: PNG drawn from media/menu/*.svg (albert-go's line style), rendered at 32 px with
+// `inkscape x.svg -w 32 -h 32 -o x.png`.
+const ICON_DEVICE: &[u8] = include_bytes!("../../media/menu/device.png");
+const ICON_STOP: &[u8] = include_bytes!("../../media/menu/stop.png");
+const ICON_FREEZE: &[u8] = include_bytes!("../../media/menu/freeze.png");
+const ICON_SCREEN: &[u8] = include_bytes!("../../media/menu/screen.png");
+const ICON_PRESET: &[u8] = include_bytes!("../../media/menu/preset.png");
+const ICON_TERMINAL: &[u8] = include_bytes!("../../media/menu/terminal.png");
+const ICON_QUIT: &[u8] = include_bytes!("../../media/menu/quit.png");
+
 pub struct Tray {
     pub view: View,
     actions: Sender<Action>,
@@ -54,8 +64,14 @@ impl Tray {
         Self { view: View::default(), actions }
     }
 
-    fn item(&self, label: &str, action: fn() -> Action) -> MenuItem<Self> {
-        StandardItem { label: label.into(), activate: Box::new(move |t: &mut Self| t.send(action())), ..Default::default() }.into()
+    fn item(&self, label: &str, icon: &[u8], action: fn() -> Action) -> MenuItem<Self> {
+        StandardItem {
+            label: label.into(),
+            icon_data: icon.to_vec(),
+            activate: Box::new(move |t: &mut Self| t.send(action())),
+            ..Default::default()
+        }
+        .into()
     }
 
     fn send(&self, action: Action) {
@@ -106,6 +122,7 @@ impl ksni::Tray for Tray {
                     // The menu shows these in dark gray: there before, silent now.
                     label: if *answered { name } else { format!("{name} (not answering)") },
                     checked: self.view.casting.as_deref() == Some(device.id.as_str()),
+                    icon_data: ICON_DEVICE.to_vec(),
                     activate: Box::new(move |t: &mut Self| t.send(Action::Choose(device.clone()))),
                     ..Default::default()
                 }
@@ -117,17 +134,18 @@ impl ksni::Tray for Tray {
         }
         items.push(MenuItem::Separator);
         if self.view.casting.is_some() {
-            items.push(self.item("Stop", || Action::Stop));
+            items.push(self.item("Stop", ICON_STOP, || Action::Stop));
             items.push(
                 CheckmarkItem {
                     label: "Freeze".into(),
                     checked: self.view.frozen,
+                    icon_data: ICON_FREEZE.to_vec(),
                     activate: Box::new(|t: &mut Self| t.send(Action::Freeze)),
                     ..Default::default()
                 }
                 .into(),
             );
-            items.push(self.item("Choose screen...", || Action::PickScreen));
+            items.push(self.item("Choose screen...", ICON_SCREEN, || Action::PickScreen));
             items.push(MenuItem::Separator);
         }
         let options = crate::menu::PRESETS.iter().map(|(name, ..)| RadioItem { label: label(name), ..Default::default() }).collect();
@@ -137,9 +155,9 @@ impl ksni::Tray for Tray {
             select: Box::new(|t: &mut Self, i| t.send(Action::Preset(i))),
             options,
         };
-        items.push(SubMenu { label: "Preset".into(), submenu: vec![presets.into()], ..Default::default() }.into());
-        items.push(self.item("Terminal menu", || Action::TerminalMenu));
-        items.push(self.item("Quit", || Action::Quit));
+        items.push(SubMenu { label: "Preset".into(), icon_data: ICON_PRESET.to_vec(), submenu: vec![presets.into()], ..Default::default() }.into());
+        items.push(self.item("Terminal menu", ICON_TERMINAL, || Action::TerminalMenu));
+        items.push(self.item("Quit", ICON_QUIT, || Action::Quit));
         items
     }
 }
