@@ -135,7 +135,7 @@ To do:
 
 Done:
 
-- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.6.0
+- [x] .deb packages for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.7.0
 - [x] GitHub builds the .deb packages and attaches them when a release is published
 - [x] Builds with Rust 1.92 or newer
 - [x] Sources in folders (capture, device, hls, menu, mirror, session), each file under 200 lines of code
