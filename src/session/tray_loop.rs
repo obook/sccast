@@ -58,6 +58,17 @@ pub fn run_tray(mut settings: menu::Settings) -> anyhow::Result<()> {
                 Action::Choose(device) if menu.casting() == Some(device.id.as_str()) => act = Some(menu::Action::Cast(device)),
                 Action::Choose(device) => menu.check(device),
                 Action::Replace(device) => act = Some(menu::Action::Cast(device)),
+                Action::Rescan => menu.scan(),
+                Action::Forget => {
+                    let (count, tx) = (menu.devices().iter().filter(|(_, answered)| !answered).count(), tx.clone());
+                    // In a thread: the icon keeps answering while the box is open.
+                    std::thread::spawn(move || {
+                        if tray::confirm_forget(count) {
+                            let _ = tx.send(Action::Forgotten);
+                        }
+                    });
+                }
+                Action::Forgotten => menu.forget_silent(),
                 Action::Stop => act = Some(menu::Action::Stop),
                 Action::Freeze => toggle_freeze(),
                 Action::PickScreen => pick_screen(Out::Menu(menu.current_sender()), &casts.screen),

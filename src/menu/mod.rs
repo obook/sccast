@@ -219,6 +219,14 @@ impl Menu {
         self.casting = id;
     }
 
+    /// Forget the listed devices that did not answer since the last scan, in the list and in
+    /// the devices file. They come back on their next answer.
+    pub fn forget_silent(&mut self) {
+        let silent: Vec<String> = self.devices.keys().filter(|id| !self.answered.contains(*id)).cloned().collect();
+        self.devices.retain(|id, _| !silent.contains(id));
+        crate::device::discovery::forget(&silent);
+    }
+
     /// Devices as listed, each with whether it answered since the last scan.
     pub fn devices(&self) -> Vec<(CastDevice, bool)> {
         self.list().into_iter().map(|d| (d.clone(), self.answered.contains(&d.id))).collect()

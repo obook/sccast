@@ -19,7 +19,7 @@ use crate::device::{discovery, CastDevice};
 impl Menu {
     /// Browse in a thread while the menu is open; devices show up as they answer.
     /// A busy network loses answers: each round asks again and adds the late devices.
-    pub(super) fn scan(&mut self) {
+    pub fn scan(&mut self) {
         self.scanning = true;
         // Devices gone since the last scan (unplugged, new address) must not stay listed, except
         // the remembered ones: a busy network may hide devices that are there.

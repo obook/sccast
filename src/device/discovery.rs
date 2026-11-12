@@ -117,9 +117,20 @@ fn update(memory: &mut Memory, device: &CastDevice, now: u64) -> bool {
 pub fn seen(device: &CastDevice) {
     let now = now();
     let mut memory = load(now);
-    if !update(&mut memory, device, now) {
-        return;
+    if update(&mut memory, device, now) {
+        save(&memory);
     }
+}
+
+/// Drop `ids` from the devices file: the user asked to forget them. They come back on their
+/// next answer.
+pub fn forget(ids: &[String]) {
+    let mut memory = load(now());
+    memory.retain(|id, _| !ids.contains(id));
+    save(&memory);
+}
+
+fn save(memory: &Memory) {
     let path = devices_file();
     let text: String = memory.values().map(|(d, seen)| d.to_line(*seen) + "\n").collect();
     let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&path, text));
