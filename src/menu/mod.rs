@@ -82,8 +82,12 @@ pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
 
 pub struct Menu {
     devices: BTreeMap<String, CastDevice>,
-    /// Ids that answered since the last scan; the others come from the devices file only.
+    /// Ids that answered during the last full round or since; the others come from the devices file only.
     answered: HashSet<String>,
+    /// Ids that answered during the round under way, and during the one before: a device is
+    /// silent once both are over without it.
+    round: HashSet<String>,
+    previous_round: HashSet<String>,
     device: ListState,
     row: ListState,
     on_settings: bool,
@@ -126,6 +130,8 @@ impl Menu {
         Self {
             devices: BTreeMap::new(),
             answered: HashSet::new(),
+            round: HashSet::new(),
+            previous_round: HashSet::new(),
             device: ListState::default().with_selected(Some(0)),
             row: ListState::default().with_selected(Some(0)),
             on_settings: false,

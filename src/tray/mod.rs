@@ -52,6 +52,8 @@ pub struct View {
 // Menu icons: PNG drawn from media/menu/*.svg (albert-go's line style), rendered at 32 px with
 // `inkscape x.svg -w 32 -h 32 -o x.png`.
 const ICON_DEVICE: &[u8] = include_bytes!("../../media/menu/device.png");
+/// The same drawing in gray, for a device not answering.
+const ICON_DEVICE_SILENT: &[u8] = include_bytes!("../../media/menu/device-silent.png");
 const ICON_STOP: &[u8] = include_bytes!("../../media/menu/stop.png");
 const ICON_FREEZE: &[u8] = include_bytes!("../../media/menu/freeze.png");
 const ICON_SCREEN: &[u8] = include_bytes!("../../media/menu/screen.png");
@@ -129,7 +131,7 @@ impl ksni::Tray for Tray {
                     // The menu shows these in dark gray: there before, silent now.
                     label: if *answered { name } else { format!("{name} (not answering)") },
                     checked: self.view.casting.as_deref() == Some(device.id.as_str()),
-                    icon_data: ICON_DEVICE.to_vec(),
+                    icon_data: if *answered { ICON_DEVICE.to_vec() } else { ICON_DEVICE_SILENT.to_vec() },
                     activate: Box::new(move |t: &mut Self| t.send(Action::Choose(device.clone()))),
                     ..Default::default()
                 }
