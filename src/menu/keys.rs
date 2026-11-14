@@ -25,6 +25,8 @@ impl Menu {
         // the remembered ones: a busy network may hide devices that are there.
         self.devices = discovery::remembered().into_iter().map(|d| (d.id.clone(), d)).collect();
         self.answered.clear();
+        self.round.clear();
+        self.previous_round.clear();
         if self.browsing {
             // The round under way began before the clear: wait for the next full one.
             self.skip_done = true;
@@ -84,6 +86,7 @@ impl Menu {
                 // Keyed by id: a device answers several times.
                 Found::Device(d) => {
                     self.answered.insert(d.id.clone());
+                    self.round.insert(d.id.clone());
                     discovery::seen(&d);
                     self.devices.insert(d.id.clone(), d);
                 }
@@ -91,10 +94,21 @@ impl Menu {
                     if let Some(d) = self.devices.get(&id) {
                         discovery::seen(d);
                     }
-                    self.answered.insert(id);
+                    self.answered.insert(id.clone());
+                    self.round.insert(id);
                 }
-                Found::Done if self.skip_done => self.skip_done = false,
-                Found::Done => self.scanning = false,
+                // A device silent for two whole rounds (ping and browse) goes to "not answering".
+                // One lost round is common on a school Wi-Fi: a cut of a few seconds must not gray the list.
+                Found::Done => {
+                    let round = std::mem::take(&mut self.round);
+                    self.answered = round.union(&self.previous_round).cloned().collect();
+                    self.previous_round = round;
+                    if self.skip_done {
+                        self.skip_done = false;
+                    } else {
+                        self.scanning = false;
+                    }
+                }
                 Found::Checked(d, app) if self.checking.as_deref() == Some(d.id.as_str()) => {
                     self.checking = None;
                     return Some(match app {

@@ -139,14 +139,15 @@ fn save(memory: &Memory) {
     }
 }
 
-/// Ids of the `devices` that answer one ping within 1 s, all pinged at once.
+/// Ids of the `devices` that answer one ping within 3 s, all pinged at once. 3 s: a loaded
+/// school Wi-Fi answers late, not never.
 // shortcut: runs the system ping (iputils, in every Ubuntu); none answer if it is missing.
 pub fn ping_all(devices: &[CastDevice]) -> Vec<String> {
     use std::process::{Command, Stdio};
     let children: Vec<_> = devices
         .iter()
         .filter_map(|d| {
-            let child = Command::new("ping").args(["-c1", "-W1", &d.ip.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+            let child = Command::new("ping").args(["-c1", "-W3", &d.ip.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
             child.ok().map(|c| (&d.id, c))
         })
         .collect();
