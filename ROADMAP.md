@@ -75,7 +75,7 @@ Done:
 - [x] Stays during the cast: state, duration, buffering, CPU, bitrate, alerts
 - [x] Scrollbar and count for long device lists
 - [x] Retry the launch and the reconnection without limit (a first launch on a Chromecast failed after 63 s, the next took 2 s)
-- [x] Closing the terminal or the Konsole tab frees the TV
+- [x] Closing the terminal tab frees the TV (first terminal found: xdg-terminal-exec, x-terminal-emulator, konsole, gnome-terminal, xfce4-terminal, kitty, alacritty, foot, xterm)
 - [x] Alert when the TV buffers more than twice a minute
 - [x] Audio delay in 50 ms steps, from -500 to 1500 ms
 
