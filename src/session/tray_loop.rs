@@ -142,13 +142,29 @@ fn toggle_freeze() {
     }
 }
 
-/// Open the terminal menu in Konsole.
-// shortcut: Konsole only (KDE), switch to xdg-terminal-exec once the distributions ship it.
+/// Open the terminal menu in the first terminal emulator found.
 fn terminal_menu() {
+    // The desktop's choice first (xdg-terminal-exec, Debian alternatives), then the usual ones.
+    // gnome-terminal wants "--" where the others take "-e".
+    const TERMINALS: &[(&str, &[&str])] = &[
+        ("xdg-terminal-exec", &[]),
+        ("x-terminal-emulator", &["-e"]),
+        ("konsole", &["-e"]),
+        ("gnome-terminal", &["--"]),
+        ("xfce4-terminal", &["-e"]),
+        ("kitty", &["-e"]),
+        ("alacritty", &["-e"]),
+        ("foot", &["-e"]),
+        ("xterm", &["-e"]),
+    ];
     // After an upgrade, the running file is gone: the one installed then.
     let sccast = std::env::current_exe().ok().filter(|exe| exe.exists()).unwrap_or_else(|| "sccast".into());
-    match Command::new("konsole").arg("-e").arg(sccast).spawn() {
-        Ok(mut konsole) => drop(std::thread::spawn(move || konsole.wait())),
-        Err(e) => tray::notify(&format!("Konsole did not start: {e}")),
+    for (terminal, args) in TERMINALS {
+        match Command::new(terminal).args(*args).arg(&sccast).spawn() {
+            Ok(mut child) => return drop(std::thread::spawn(move || child.wait())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return tray::notify(&format!("{terminal} did not start: {e}")),
+        }
     }
+    tray::notify("No terminal emulator found: install konsole, gnome-terminal or xterm");
 }
