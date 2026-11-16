@@ -157,7 +157,8 @@ freezes and chooses another screen. Freeze waits half a second for the menu
 to close, so the frozen image does not show it. The receiver stays open
 between casts, as in the terminal menu.
 
-A red dot on the icon marks a running cast; errors show as notifications.
+A red dot on the icon marks a running cast; the icon turns to ice with pause bars while
+the image is frozen. Errors show as notifications.
 The screen dialog comes back at each cast: sccast shares the screen only
 while a cast runs.
 
