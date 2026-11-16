@@ -102,17 +102,16 @@ impl ksni::Tray for Tray {
     }
 
     // Pixels, not the icon name: a name the theme lacks (sccast not installed) shows nothing.
+    // Frozen: the whole icon turns to ice with pause bars, since a theme pause overlay is
+    // a dark speck on the dark icon, invisible in the panel.
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![ksni::Icon { width: 64, height: 64, data: include_bytes!("../../media/icon-64.argb").to_vec() }]
+        let data = if self.view.frozen { &include_bytes!("../../media/icon-frozen-64.argb")[..] } else { include_bytes!("../../media/icon-64.argb") };
+        vec![ksni::Icon { width: 64, height: 64, data: data.to_vec() }]
     }
 
+    /// A red dot while a cast runs, frozen or not.
     fn overlay_icon_name(&self) -> String {
-        match (&self.view.casting, self.view.frozen) {
-            (None, _) => "",
-            (Some(_), false) => "media-record",
-            (Some(_), true) => "media-playback-pause",
-        }
-        .into()
+        if self.view.casting.is_some() { "media-record" } else { "" }.into()
     }
 
     fn tool_tip(&self) -> ToolTip {
