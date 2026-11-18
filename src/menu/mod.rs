@@ -185,6 +185,8 @@ impl Menu {
                 self.casting = None;
                 self.recast_at = None;
                 self.live.started = None;
+                // A cast that ends must not leave the icon frozen.
+                crate::capture::FREEZE.store(false, std::sync::atomic::Ordering::SeqCst);
                 self.status = status;
             }
         }
