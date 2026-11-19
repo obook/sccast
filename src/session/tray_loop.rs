@@ -35,6 +35,10 @@ pub fn run_tray(mut settings: menu::Settings) -> anyhow::Result<()> {
     if let Ok(file) = std::fs::File::create(crate::runtime_file("sccast-tray.log")) {
         let _ = crate::MENU_LOG.set(file);
     }
+    // Without them, the icon falls back to the installed application icon.
+    if let Err(e) = tray::write_icons() {
+        tracing::warn!("tray icons not written: {e}");
+    }
     let (tx, actions) = mpsc::channel();
     // Started with the session, the tray may come before the desktop's panel: it waits for it.
     let icon = tray::Tray::new(tx.clone()).assume_sni_available(true).spawn().context("no notification area")?;
