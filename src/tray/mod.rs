@@ -101,17 +101,22 @@ impl ksni::Tray for Tray {
         "sccast".into()
     }
 
-    // Pixels, not the icon name: a name the theme lacks (sccast not installed) shows nothing.
-    // Frozen: the whole icon turns to ice with pause bars, since a theme pause overlay is
-    // a dark speck on the dark icon, invisible in the panel.
-    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        let data = if self.view.frozen { &include_bytes!("../../media/icon-frozen-64.argb")[..] } else { include_bytes!("../../media/icon-64.argb") };
-        vec![ksni::Icon { width: 64, height: 64, data: data.to_vec() }]
+    // Monochrome icons the desktop recolors for a light or a dark panel, written by
+    // write_icons(). Frozen: pause bars in place of the waves. No pixmap: Plasma shows it
+    // in place of the name.
+    // Given as IconThemePath, Plasma reads them with a new icon loader: its own, made before
+    // write_icons(), kept showing the application icon until it restarted.
+    fn icon_theme_path(&self) -> String {
+        icon_dir().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default()
     }
 
-    /// A red dot while a cast runs, frozen or not.
-    fn overlay_icon_name(&self) -> String {
-        if self.view.casting.is_some() { "media-record" } else { "" }.into()
+    fn icon_name(&self) -> String {
+        match (self.view.casting.is_some(), self.view.frozen) {
+            (_, true) => "sccast-tray-frozen-symbolic",
+            (true, false) => "sccast-tray-casting-symbolic",
+            (false, false) => "sccast-tray-symbolic",
+        }
+        .into()
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -214,6 +219,33 @@ pub fn notify(text: &str) {
     });
 }
 
+/// The user's icons: ~/.local/share/icons. Plasma 6.8 reads an IconThemePath only through
+/// the usual icon directories, and a name it does not find falls back to "sccast", the
+/// colored application icon.
+fn icon_dir() -> Option<std::path::PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/share")));
+    data.map(|data| data.join("icons"))
+}
+
+/// Write the tray icons to the user's hicolor theme.
+pub fn write_icons() -> std::io::Result<()> {
+    // Drawn on a 22 px grid, the size of a Plasma panel icon.
+    const ICONS: [(&str, &str); 3] = [
+        ("sccast-tray-symbolic.svg", include_str!("../../media/tray/sccast-tray-symbolic.svg")),
+        ("sccast-tray-casting-symbolic.svg", include_str!("../../media/tray/sccast-tray-casting-symbolic.svg")),
+        ("sccast-tray-frozen-symbolic.svg", include_str!("../../media/tray/sccast-tray-frozen-symbolic.svg")),
+    ];
+    let dir = icon_dir().ok_or(std::io::ErrorKind::NotFound)?.join("hicolor/scalable/status");
+    std::fs::create_dir_all(&dir)?;
+    // Rewritten at each start, they made Plasma miss them and show the application icon.
+    ICONS
+        .iter()
+        .filter(|(name, svg)| !std::fs::read_to_string(dir.join(name)).is_ok_and(|old| old == *svg))
+        .try_for_each(|(name, svg)| std::fs::write(dir.join(name), svg))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +295,18 @@ mod tests {
         // All answering: nothing to forget.
         tray.view.devices[1].1 = true;
         assert!(!labels(&tray).iter().any(|l| l.starts_with("Forget")));
+    }
+
+    #[test]
+    fn icon_follows_the_cast() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut tray = Tray::new(tx);
+        assert_eq!(tray.icon_name(), "sccast-tray-symbolic");
+        tray.view.casting = Some("a".into());
+        assert_eq!(tray.icon_name(), "sccast-tray-casting-symbolic");
+        tray.view.frozen = true;
+        assert_eq!(tray.icon_name(), "sccast-tray-frozen-symbolic");
+        tray.view = View::default();
+        assert_eq!(tray.icon_name(), "sccast-tray-symbolic");
     }
 }
