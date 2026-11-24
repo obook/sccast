@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+# 0.9.1 and older started the tray with every session.
+dpkg-maintscript-helper rm_conffile \
+    /etc/xdg/autostart/sccast-tray.desktop 0.9.2~ sccast -- "$@"
