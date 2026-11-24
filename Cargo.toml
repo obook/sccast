@@ -51,10 +51,11 @@ assets = [
     ["target/release/sccast", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/sccast/", "644"],
     ["media/icon.svg", "usr/share/icons/hicolor/scalable/apps/sccast.svg", "644"],
-    # The tray: in the application menu, and started with every session.
+    # The tray: in the application menu only, not started with the session.
     ["packaging/sccast-tray.desktop", "usr/share/applications/", "644"],
-    ["packaging/sccast-tray.desktop", "etc/xdg/autostart/", "644"],
 ]
+# Removes /etc/xdg/autostart/sccast-tray.desktop left by 0.9.1 and older: dpkg keeps a dropped conffile.
+maintainer-scripts = "packaging/debian/"
 
 # rust_cast 0.21.0 with one patch in src/lib.rs (NoCertificateVerification): accept the
 # X.509 v1 certificates of some TVs, which fail with UnsupportedCertVersion.

@@ -148,7 +148,8 @@ problem. VLC stutters on this live stream and is not a reliable check.
 ## Tray
 
 `sccast tray` puts an icon in the desktop's notification area. The `.deb`
-starts it with each session; turn that off in System Settings > Autostart.
+adds it to the application menu; to start it with each session, add it in
+System Settings > Autostart.
 
 Its menu lists the devices; click one to cast to it. If the device plays
 another sender's app, sccast asks in a box before replacing it. The menu
